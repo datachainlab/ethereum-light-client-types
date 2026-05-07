@@ -1,0 +1,27 @@
+name: test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  rust-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test
+      - run: make lint-tools
+      - run: make lint
+
+  go-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - run: go test ./prover/...

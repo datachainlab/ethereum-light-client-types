@@ -1,0 +1,19 @@
+version: v1
+name: buf.build/datachainlab/ethereum-light-client-types
+deps:
+  - buf.build/cosmos/gogo-proto
+  - buf.build/cosmos/ibc:e2006674271c4a53bf0b98b66de0fc50
+breaking:
+  use:
+    - FILE
+lint:
+  use:
+    - DEFAULT
+    - COMMENTS
+    - FILE_LOWER_SNAKE_CASE
+  except:
+    - UNARY_RPC
+    - COMMENT_FIELD
+    - SERVICE_SUFFIX
+    - PACKAGE_VERSION_SUFFIX
+    - RPC_REQUEST_STANDARD_NAME
