@@ -6,26 +6,17 @@
 
 use crate::errors::Error;
 use core::time::Duration;
+use ethereum_consensus::beacon::Slot;
+use ethereum_consensus::compute::compute_timestamp_at_slot;
+use ethereum_consensus::context::ChainContext;
 use light_client::types::Time;
 
 /// Creates a [`Time`] from a Unix timestamp in seconds.
-///
-/// # Errors
-///
-/// Returns [`Error::Time`] if the timestamp is invalid.
 pub fn new_timestamp(second: u64) -> Result<Time, Error> {
     Time::from_unix_timestamp(second as i64, 0).map_err(Error::Time)
 }
 
-/// Validates that the trusted consensus state is within the trusting period.
-///
-/// The trusting period is the maximum time since the trusted state was created
-/// during which it can still be used to verify new headers.
-///
-/// # Errors
-///
-/// - [`Error::CurrentTimeBeforeTrustedState`]: Current time is before the trusted state time
-/// - [`Error::OutOfTrustingPeriod`]: Trusted state has expired
+/// Validates that the trusted consensus state is still within the trusting period.
 pub fn validate_state_timestamp_within_trusting_period(
     current_timestamp: Time,
     trusting_period: Duration,
@@ -48,15 +39,7 @@ pub fn validate_state_timestamp_within_trusting_period(
     Ok(())
 }
 
-/// Validates that the header timestamp is not too far in the future.
-///
-/// Allows for clock drift between the local clock and the chain's clock.
-/// A header is considered from the future if its timestamp exceeds
-/// `current_timestamp + clock_drift`.
-///
-/// # Errors
-///
-/// Returns [`Error::HeaderFromFuture`] if the header timestamp is too far in the future.
+/// Validates that the header timestamp is not in the future, allowing for `clock_drift`.
 pub fn validate_header_timestamp_not_future(
     current_timestamp: Time,
     clock_drift: Duration,
@@ -73,9 +56,86 @@ pub fn validate_header_timestamp_not_future(
     Ok(())
 }
 
+/// Validates that the header timestamp is non-zero and equals
+/// `compute_timestamp_at_slot(finalized_slot)`.
+pub fn validate_header_timestamp<C: ChainContext>(
+    ctx: &C,
+    finalized_slot: Slot,
+    header_timestamp: Time,
+) -> Result<(), Error> {
+    if header_timestamp.as_unix_timestamp_nanos() == 0 {
+        return Err(Error::ZeroTimestamp);
+    }
+    let expected = new_timestamp(compute_timestamp_at_slot(ctx, finalized_slot).0)?;
+    if header_timestamp.as_unix_timestamp_nanos() != expected.as_unix_timestamp_nanos() {
+        return Err(Error::UnexpectedTimestamp {
+            expected,
+            actual: header_timestamp,
+        });
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec;
+    use ethereum_consensus::config;
+    use ethereum_consensus::context::DefaultChainContext;
+    use ethereum_consensus::fork::{altair::ALTAIR_FORK_SPEC, ForkParameter, ForkParameters};
+    use ethereum_consensus::preset;
+    use ethereum_consensus::types::U64;
+
+    fn test_context() -> DefaultChainContext {
+        // genesis_slot = 0, seconds_per_slot = 6 (minimal preset),
+        // genesis_time = min_genesis_time => timestamp(slot) = 1578009600 + slot * 6
+        let cfg = config::Config {
+            preset: preset::minimal::PRESET,
+            fork_parameters: ForkParameters::new(
+                ethereum_consensus::beacon::Version([0, 0, 0, 1]),
+                vec![ForkParameter::new(
+                    ethereum_consensus::beacon::Version([1, 0, 0, 1]),
+                    U64(0),
+                    ALTAIR_FORK_SPEC,
+                )],
+            )
+            .unwrap(),
+            min_genesis_time: U64(1578009600),
+        };
+        DefaultChainContext::new_with_config(U64(1729846322), cfg)
+    }
+
+    #[test]
+    fn test_validate_header_timestamp_success() {
+        let ctx = test_context();
+        let slot = Slot::from(10u64);
+        let expected_secs = compute_timestamp_at_slot(&ctx, slot).0;
+        let header_timestamp = new_timestamp(expected_secs).unwrap();
+        assert!(validate_header_timestamp(&ctx, slot, header_timestamp).is_ok());
+    }
+
+    #[test]
+    fn test_validate_header_timestamp_zero() {
+        let ctx = test_context();
+        let header_timestamp = Time::from_unix_timestamp_nanos(0).unwrap();
+        assert!(matches!(
+            validate_header_timestamp(&ctx, Slot::from(10u64), header_timestamp),
+            Err(Error::ZeroTimestamp)
+        ));
+    }
+
+    #[test]
+    fn test_validate_header_timestamp_mismatch() {
+        let ctx = test_context();
+        let slot = Slot::from(10u64);
+        // off by one second from the slot-derived timestamp
+        let expected_secs = compute_timestamp_at_slot(&ctx, slot).0;
+        let header_timestamp = new_timestamp(expected_secs + 1).unwrap();
+        assert!(matches!(
+            validate_header_timestamp(&ctx, slot, header_timestamp),
+            Err(Error::UnexpectedTimestamp { .. })
+        ));
+    }
 
     #[test]
     fn test_new_timestamp() {

@@ -7,6 +7,7 @@ use crate::client_state::ClientState;
 use crate::commitment::{
     calculate_ibc_commitment_storage_location, decode_eip1184_rlp_proof, keccak_256,
 };
+use crate::consensus::ETHEREUM_CLIENT_REVISION_NUMBER;
 use crate::consensus_state::ConsensusState;
 use crate::errors::Error;
 use alloc::string::String;
@@ -15,22 +16,8 @@ use ethereum_consensus::types::H256;
 use ethereum_light_client_verifier::execution::ExecutionVerifier;
 use light_client::types::{ClientId, Height};
 
-/// Verifies that a value exists at the given path in the IBC contract storage.
-///
-/// This function verifies a membership proof by:
-/// 1. Validating the proof height against the client state
-/// 2. Computing the storage key from the IBC path
-/// 3. Verifying the value's keccak256 hash exists at that key
-///
-/// # Returns
-///
-/// Returns the keccak256 hash of the value on success.
-///
-/// # Errors
-///
-/// - [`Error::UnexpectedProofHeight`]: Proof height exceeds client's latest height
-/// - [`Error::UnexpectedStorageRoot`]: Storage root is zero
-/// - [`Error::MembershipVerification`]: Proof verification failed
+/// Verifies that `value` exists at `path` in the IBC contract storage,
+/// returning the keccak256 hash of the value on success.
 pub fn verify_membership<CS: ClientState, CSS: ConsensusState>(
     client_state: &CS,
     consensus_state: &CSS,
@@ -72,18 +59,7 @@ pub fn verify_membership<CS: ClientState, CSS: ConsensusState>(
     Ok(value_hash)
 }
 
-/// Verifies that no value exists at the given path in the IBC contract storage.
-///
-/// This function verifies a non-membership proof by:
-/// 1. Validating the proof height against the client state
-/// 2. Computing the storage key from the IBC path
-/// 3. Verifying no value exists at that key
-///
-/// # Errors
-///
-/// - [`Error::UnexpectedProofHeight`]: Proof height exceeds client's latest height
-/// - [`Error::UnexpectedStorageRoot`]: Storage root is zero
-/// - [`Error::NonMembershipVerification`]: Proof verification failed
+/// Verifies that no value exists at `path` in the IBC contract storage.
 pub fn verify_non_membership<CS: ClientState, CSS: ConsensusState>(
     client_state: &CS,
     consensus_state: &CSS,
@@ -125,12 +101,23 @@ struct ValidateMembershipResult {
 fn validate_membership_args<CS: ClientState, CSS: ConsensusState>(
     client_state: &CS,
     consensus_state: &CSS,
-    _client_id: &ClientId,
+    client_id: &ClientId,
     path: &str,
     proof_height: &Height,
     proof: Vec<u8>,
 ) -> Result<ValidateMembershipResult, Error> {
     let proof_height = *proof_height;
+    if proof_height.revision_number() != ETHEREUM_CLIENT_REVISION_NUMBER {
+        return Err(Error::UnexpectedHeightRevisionNumber {
+            expected: ETHEREUM_CLIENT_REVISION_NUMBER,
+            got: proof_height.revision_number(),
+        });
+    }
+    if client_state.is_frozen() {
+        return Err(Error::ClientFrozen {
+            client_id: client_id.clone(),
+        });
+    }
     if client_state.latest_height() < proof_height {
         return Err(Error::UnexpectedProofHeight {
             proof_height,
@@ -314,6 +301,48 @@ mod tests {
             }
             _ => panic!("Expected UnexpectedProofHeight error"),
         }
+    }
+
+    #[test]
+    fn test_validate_membership_args_frozen_client() {
+        let mut client_state = create_mock_client_state(100);
+        client_state.is_frozen = true;
+        let consensus_state = create_mock_consensus_state(None);
+        let client_id = ClientId::new("07-tendermint", 0).unwrap();
+        let proof_height = Height::new(0, 50);
+
+        let result = validate_membership_args::<MockClientState, MockConsensusState>(
+            &client_state,
+            &consensus_state,
+            &client_id,
+            "test/path",
+            &proof_height,
+            create_test_rlp_proof(),
+        );
+
+        assert!(matches!(result, Err(Error::ClientFrozen { .. })));
+    }
+
+    #[test]
+    fn test_validate_membership_args_unexpected_revision() {
+        let client_state = create_mock_client_state(100);
+        let consensus_state = create_mock_consensus_state(None);
+        let client_id = ClientId::new("07-tendermint", 0).unwrap();
+        let proof_height = Height::new(1, 50); // revision != 0
+
+        let result = validate_membership_args::<MockClientState, MockConsensusState>(
+            &client_state,
+            &consensus_state,
+            &client_id,
+            "test/path",
+            &proof_height,
+            create_test_rlp_proof(),
+        );
+
+        assert!(matches!(
+            result,
+            Err(Error::UnexpectedHeightRevisionNumber { expected: 0, got: 1 })
+        ));
     }
 
     #[test]

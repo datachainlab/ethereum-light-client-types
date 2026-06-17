@@ -9,7 +9,7 @@ use alloc::vec::Vec;
 use core::time::Duration;
 use ethereum_consensus::bls::PublicKey;
 use ethereum_consensus::types::{H256, U64};
-use light_client::types::{Height, Time};
+use light_client::types::{ClientId, Height, Time};
 
 /// Error type for Ethereum light client operations.
 #[derive(Debug, thiserror::Error)]
@@ -29,6 +29,8 @@ pub enum Error {
     },
     #[error("unexpected height revision number: expected={expected} got={got}")]
     UnexpectedHeightRevisionNumber { expected: u64, got: u64 },
+    #[error("client is frozen: client_id={client_id}")]
+    ClientFrozen { client_id: ClientId },
     #[error("unexpected proof height: proof_height={proof_height} latest_height={latest_height}")]
     UnexpectedProofHeight {
         proof_height: Height,
@@ -102,6 +104,10 @@ pub enum Error {
         clock_drift: Duration,
         header_timestamp: Time,
     },
+    #[error("zero timestamp")]
+    ZeroTimestamp,
+    #[error("unexpected header timestamp: expected={expected} actual={actual}")]
+    UnexpectedTimestamp { expected: Time, actual: Time },
 
     // ========================================================================
     // Serialization errors
