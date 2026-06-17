@@ -1,7 +1,7 @@
 //! Validation utilities for Ethereum light client updates.
 //!
 //! This module provides validation functions for consensus and execution updates,
-//! including pre-Gloas block hash verification.
+//! including execution block hash verification.
 
 use crate::consensus::ExecutionUpdateInfo;
 use crate::errors::Error;
@@ -14,11 +14,10 @@ use ethereum_light_client_verifier::updates::ConsensusUpdate;
 /// Difference between block_number gindex and block_hash gindex in ExecutionPayload.
 const BLOCK_NUMBER_TO_BLOCK_HASH_DIFF: u32 = 6;
 
-/// Validates the execution update block hash for pre-Gloas forks.
+/// Validates the execution update block hash.
 ///
-/// For hard forks before Gloas, the execution payload root is a Merkle root
-/// and the block hash must be verified via a Merkle proof. For Gloas and later,
-/// the execution root is the block hash directly, so this validation is skipped.
+/// The execution payload root is a Merkle root, so the block hash is verified
+/// via a Merkle proof against it.
 ///
 /// This validation is required for L2 chains like Optimism and Arbitrum.
 /// It is not needed for Ethereum mainnet.
@@ -42,14 +41,12 @@ where
     CU: ConsensusUpdate<SYNC_COMMITTEE_SIZE>,
 {
     let fork_spec = ctx.compute_fork_spec(consensus_update.finalized_beacon_header().slot);
-    if fork_spec.execution_block_hash_gindex == 0 {
-        let trusted_execution_root = consensus_update.finalized_execution_root();
-        validate_block_hash(execution_update, fork_spec, trusted_execution_root)?;
-    }
+    let trusted_execution_root = consensus_update.finalized_execution_root();
+    validate_block_hash(execution_update, fork_spec, trusted_execution_root)?;
     Ok(())
 }
 
-/// Validates the execution update block hash for pre-Gloas forks using a raw execution root.
+/// Validates the execution update block hash using a raw execution root.
 ///
 /// This is a lower-level variant that takes the execution root directly rather than
 /// extracting it from a consensus update.
@@ -74,9 +71,7 @@ where
     CC: ChainConsensusVerificationContext,
 {
     let fork_spec = ctx.compute_fork_spec(slot.into());
-    if fork_spec.execution_block_hash_gindex == 0 {
-        validate_block_hash(execution_update, fork_spec, execution_root)?;
-    }
+    validate_block_hash(execution_update, fork_spec, execution_root)?;
     Ok(())
 }
 
@@ -120,7 +115,6 @@ mod tests {
             state_root_branch: vec![],
             block_number: U64::from(0),
             block_number_branch: vec![],
-            rlp: vec![],
             block_hash: H256::default(),
             block_hash_branch: vec![],
         }

@@ -100,8 +100,6 @@ pub struct ExecutionUpdateInfo {
     pub block_number: U64,
     /// Branch indicating the block number in the tree corresponding to the execution payload
     pub block_number_branch: Vec<H256>,
-    /// RLP-encoded execution block header (for Gloas+)
-    pub rlp: Vec<u8>,
     /// Block hash of the execution payload
     pub block_hash: H256,
     /// Branch indicating the block hash in the tree corresponding to the execution payload
@@ -123,10 +121,6 @@ impl ExecutionUpdate for ExecutionUpdateInfo {
 
     fn block_number_branch(&self) -> Vec<H256> {
         self.block_number_branch.clone()
-    }
-
-    fn rlp(&self) -> Vec<u8> {
-        self.rlp.clone()
     }
 }
 
@@ -308,7 +302,6 @@ pub fn convert_proto_to_execution_update(
             .into_iter()
             .map(|n| H256::from_slice(&n))
             .collect(),
-        rlp: execution_update.rlp,
         block_hash: H256::from_slice(&execution_update.block_hash),
         block_hash_branch: execution_update
             .block_hash_branch
@@ -335,7 +328,6 @@ pub fn convert_execution_update_to_proto(
             .into_iter()
             .map(|n| n.as_bytes().to_vec())
             .collect(),
-        rlp: execution_update.rlp,
         block_hash: execution_update.block_hash.as_bytes().into(),
         block_hash_branch: execution_update
             .block_hash_branch
@@ -516,7 +508,6 @@ mod tests {
         assert!(update.state_root_branch.is_empty());
         assert_eq!(update.block_number, U64::from(0));
         assert!(update.block_number_branch.is_empty());
-        assert!(update.rlp.is_empty());
     }
 
     #[test]
@@ -526,7 +517,6 @@ mod tests {
             state_root_branch: vec![h256_from_byte(2)],
             block_number: U64::from(12345),
             block_number_branch: vec![h256_from_byte(3)],
-            rlp: vec![0xde, 0xad, 0xbe, 0xef],
             block_hash: h256_from_byte(4),
             block_hash_branch: vec![h256_from_byte(5)],
         };
@@ -535,7 +525,6 @@ mod tests {
         assert_eq!(update.state_root_branch().len(), 1);
         assert_eq!(update.block_number(), U64::from(12345));
         assert_eq!(update.block_number_branch().len(), 1);
-        assert_eq!(update.rlp(), vec![0xde, 0xad, 0xbe, 0xef]);
     }
 
     #[test]
@@ -545,7 +534,6 @@ mod tests {
             state_root_branch: vec![h256_from_byte(2), h256_from_byte(3)],
             block_number: U64::from(99999),
             block_number_branch: vec![h256_from_byte(4)],
-            rlp: vec![1, 2, 3, 4, 5],
             block_hash: h256_from_byte(5),
             block_hash_branch: vec![h256_from_byte(6), h256_from_byte(7)],
         };
@@ -557,7 +545,6 @@ mod tests {
         assert_eq!(original.state_root_branch, converted.state_root_branch);
         assert_eq!(original.block_number, converted.block_number);
         assert_eq!(original.block_number_branch, converted.block_number_branch);
-        assert_eq!(original.rlp, converted.rlp);
         assert_eq!(original.block_hash, converted.block_hash);
         assert_eq!(original.block_hash_branch, converted.block_hash_branch);
     }

@@ -24,7 +24,6 @@ const (
 	Deneb     = "deneb"
 	Electra   = "electra"
 	Fulu      = "fulu"
-	Gloas     = "gloas"
 )
 
 var (
@@ -59,19 +58,6 @@ var (
 		ExecutionPayloadBlockNumberGindex: DenebSpec.ExecutionPayloadBlockNumberGindex,
 	}
 	FuluSpec = ElectraSpec
-	// GloasSpec: Uses execution_block_hash instead of ExecutionPayloadHeader
-	// ExecutionBlockHashGindex (832) is used for merkle proof verification
-	// ExecutionPayloadStateRootGindex and ExecutionPayloadBlockNumberGindex are 0
-	// because Gloas uses RLP verification instead of SSZ merkle proofs
-	GloasSpec = types.ForkSpec{
-		FinalizedRootGindex:               ElectraSpec.FinalizedRootGindex,
-		CurrentSyncCommitteeGindex:        ElectraSpec.CurrentSyncCommitteeGindex,
-		NextSyncCommitteeGindex:           ElectraSpec.NextSyncCommitteeGindex,
-		ExecutionPayloadGindex:            0,   // Not used in Gloas
-		ExecutionPayloadStateRootGindex:   0,   // Not used in Gloas (RLP verification instead)
-		ExecutionPayloadBlockNumberGindex: 0,   // Not used in Gloas (RLP verification instead)
-		ExecutionBlockHashGindex:          832, // EXECUTION_BLOCK_HASH_GINDEX_GLOAS
-	}
 )
 
 const (
@@ -171,12 +157,6 @@ func GetForkParameters(network string, minimalForkSchedule map[string]uint64) *t
 					Epoch:   411392,
 					Spec:    &FuluSpec,
 				},
-				// Gloas fork epoch is TBD
-				{
-					Version: []byte{7, 0, 0, 0},
-					Epoch:   18446744073709551615, // TBD: set to max uint64 until confirmed
-					Spec:    &GloasSpec,
-				},
 			},
 		}
 	case Minimal:
@@ -212,11 +192,6 @@ func GetForkParameters(network string, minimalForkSchedule map[string]uint64) *t
 					Version: []byte{6, 0, 0, 1},
 					Epoch:   minimalForkSchedule[Fulu],
 					Spec:    &FuluSpec,
-				},
-				{
-					Version: []byte{7, 0, 0, 1},
-					Epoch:   minimalForkSchedule[Gloas],
-					Spec:    &GloasSpec,
 				},
 			},
 		}
@@ -254,12 +229,6 @@ func GetForkParameters(network string, minimalForkSchedule map[string]uint64) *t
 					Version: []byte{144, 0, 0, 117},
 					Epoch:   272640,
 					Spec:    &FuluSpec,
-				},
-				// Gloas Sepolia fork epoch is TBD
-				{
-					Version: []byte{144, 0, 0, 118},
-					Epoch:   18446744073709551615, // TBD: set to max uint64 until confirmed
-					Spec:    &GloasSpec,
 				},
 			},
 		}

@@ -51,8 +51,6 @@ pub struct ForkSpec {
     pub execution_payload_state_root_gindex: u32,
     #[prost(uint32, tag = "6")]
     pub execution_payload_block_number_gindex: u32,
-    #[prost(uint32, tag = "7")]
-    pub execution_block_hash_gindex: u32,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -107,8 +105,6 @@ pub struct ExecutionUpdate {
     pub block_number: u64,
     #[prost(bytes = "vec", repeated, tag = "4")]
     pub block_number_branch: ::prost::alloc::vec::Vec<::prost::alloc::vec::Vec<u8>>,
-    #[prost(bytes = "vec", tag = "5")]
-    pub rlp: ::prost::alloc::vec::Vec<u8>,
     #[prost(bytes = "vec", tag = "6")]
     pub block_hash: ::prost::alloc::vec::Vec<u8>,
     #[prost(bytes = "vec", repeated, tag = "7")]

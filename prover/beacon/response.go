@@ -28,22 +28,13 @@ type BlockRootResponse struct {
 }
 
 type LightClientHeader struct {
-	Beacon             BeaconBlockHeader
-	Execution          *ExecutionPayloadHeader // Required for pre-Gloas
-	ExecutionBlockHash []byte                  // Required for Gloas+
-	ExecutionBranch    []hexutil.Bytes
+	Beacon          BeaconBlockHeader
+	Execution       *ExecutionPayloadHeader
+	ExecutionBranch []hexutil.Bytes
 }
 
-// IsGloas returns true if this header is from Gloas fork or later
-func (h *LightClientHeader) IsGloas() bool {
-	return h.Execution == nil
-}
-
-// GetExecutionRoot returns the execution root (HashTreeRoot for pre-Gloas, BlockHash for Gloas)
+// GetExecutionRoot returns the execution root (HashTreeRoot of the ExecutionPayloadHeader)
 func (h *LightClientHeader) GetExecutionRoot() []byte {
-	if h.IsGloas() {
-		return h.ExecutionBlockHash
-	}
 	root, err := h.Execution.HashTreeRoot()
 	if err != nil {
 		panic(err)
@@ -53,10 +44,9 @@ func (h *LightClientHeader) GetExecutionRoot() []byte {
 
 func (h *LightClientHeader) UnmarshalJSON(bz []byte) error {
 	var hj struct {
-		Beacon             types.BeaconBlockHeader              `json:"beacon"`
-		Execution          *builder.ExecutionPayloadHeaderDeneb `json:"execution,omitempty"`
-		ExecutionBlockHash hexutil.Bytes                        `json:"execution_block_hash,omitempty"`
-		ExecutionBranch    []hexutil.Bytes                      `json:"execution_branch"`
+		Beacon          types.BeaconBlockHeader              `json:"beacon"`
+		Execution       *builder.ExecutionPayloadHeaderDeneb `json:"execution,omitempty"`
+		ExecutionBranch []hexutil.Bytes                      `json:"execution_branch"`
 	}
 	if err := json.Unmarshal(bz, &hj); err != nil {
 		return err
@@ -77,11 +67,7 @@ func (h *LightClientHeader) UnmarshalJSON(bz []byte) error {
 		BodyRoot:      hj.Beacon.BodyRoot,
 	}
 	h.ExecutionBranch = hj.ExecutionBranch
-	if hj.ExecutionBlockHash != nil {
-		// Gloas format
-		h.ExecutionBlockHash = hj.ExecutionBlockHash
-	} else if hj.Execution != nil {
-		// Pre-Gloas format
+	if hj.Execution != nil {
 		h.Execution = &enginev1.ExecutionPayloadHeaderDeneb{
 			ParentHash:       hj.Execution.ParentHash,
 			FeeRecipient:     hj.Execution.FeeRecipient,
