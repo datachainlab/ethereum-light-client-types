@@ -341,7 +341,10 @@ mod tests {
 
         assert!(matches!(
             result,
-            Err(Error::UnexpectedHeightRevisionNumber { expected: 0, got: 1 })
+            Err(Error::UnexpectedHeightRevisionNumber {
+                expected: 0,
+                got: 1
+            })
         ));
     }
 
