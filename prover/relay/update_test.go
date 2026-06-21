@@ -47,8 +47,9 @@ func TestBuildExecutionUpdate(t *testing.T) {
 		if len(update.BlockNumberBranch) == 0 {
 			t.Error("BlockNumberBranch is empty")
 		}
-		if update.BlockHash != nil {
-			t.Error("BlockHash should be nil when includeBlockHash is false")
+		// BlockHash is always a well-formed 32-byte value; the zero hash when not included.
+		if !bytes.Equal(update.BlockHash, make([]byte, 32)) {
+			t.Error("BlockHash should be the 32-byte zero hash when includeBlockHash is false")
 		}
 		if update.BlockHashBranch != nil {
 			t.Error("BlockHashBranch should be nil when includeBlockHash is false")

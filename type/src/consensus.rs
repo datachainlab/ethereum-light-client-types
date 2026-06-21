@@ -6,6 +6,7 @@
 
 use crate::commitment::decode_eip1184_rlp_proof;
 use crate::errors::Error;
+use alloc::string::String;
 use alloc::vec::Vec;
 use ethereum_consensus::beacon::{BeaconBlockHeader, Slot};
 use ethereum_consensus::bls::{PublicKey, Signature};
@@ -248,7 +249,7 @@ impl TryFrom<ProtoAccountUpdate> for AccountUpdateInfo {
     fn try_from(value: ProtoAccountUpdate) -> Result<Self, Self::Error> {
         Ok(Self {
             account_proof: decode_eip1184_rlp_proof(value.account_proof)?,
-            account_storage_root: H256::from_slice(&value.account_storage_root),
+            account_storage_root: try_to_h256("account_storage_root", &value.account_storage_root)?,
         })
     }
 }
@@ -263,15 +264,33 @@ fn encode_account_proof(bz: Vec<Vec<u8>>) -> Vec<u8> {
     stream.out().freeze().into()
 }
 
+/// Converts proto bytes into an `H256`, returning an error (instead of panicking
+/// in `H256::from_slice`) if the length is not 32. Used at every proto -> domain
+/// boundary so that a malformed length cannot crash the enclave.
+pub(crate) fn try_to_h256(field: &str, bz: &[u8]) -> Result<H256, Error> {
+    if bz.len() != 32 {
+        return Err(Error::InvalidH256Length {
+            field: String::from(field),
+            got: bz.len(),
+        });
+    }
+    Ok(H256::from_slice(bz))
+}
+
+/// Converts a list of proto byte arrays into `Vec<H256>`, validating each length.
+pub(crate) fn try_to_h256_vec(field: &str, bz: Vec<Vec<u8>>) -> Result<Vec<H256>, Error> {
+    bz.into_iter().map(|b| try_to_h256(field, &b)).collect()
+}
+
 pub(crate) fn convert_proto_to_header(
     header: &ProtoBeaconBlockHeader,
 ) -> Result<BeaconBlockHeader, Error> {
     Ok(BeaconBlockHeader {
         slot: header.slot.into(),
         proposer_index: header.proposer_index.into(),
-        parent_root: H256::from_slice(&header.parent_root),
-        state_root: H256::from_slice(&header.state_root),
-        body_root: H256::from_slice(&header.body_root),
+        parent_root: try_to_h256("parent_root", &header.parent_root)?,
+        state_root: try_to_h256("beacon_header.state_root", &header.state_root)?,
+        body_root: try_to_h256("body_root", &header.body_root)?,
     })
 }
 
@@ -288,27 +307,18 @@ pub(crate) fn convert_header_to_proto(header: &BeaconBlockHeader) -> ProtoBeacon
 /// Converts a Protocol Buffer execution update to the domain type.
 pub fn convert_proto_to_execution_update(
     execution_update: ProtoExecutionUpdate,
-) -> ExecutionUpdateInfo {
-    ExecutionUpdateInfo {
-        state_root: H256::from_slice(&execution_update.state_root),
-        state_root_branch: execution_update
-            .state_root_branch
-            .into_iter()
-            .map(|n| H256::from_slice(&n))
-            .collect(),
+) -> Result<ExecutionUpdateInfo, Error> {
+    Ok(ExecutionUpdateInfo {
+        state_root: try_to_h256("execution_update.state_root", &execution_update.state_root)?,
+        state_root_branch: try_to_h256_vec("state_root_branch", execution_update.state_root_branch)?,
         block_number: execution_update.block_number.into(),
-        block_number_branch: execution_update
-            .block_number_branch
-            .into_iter()
-            .map(|n| H256::from_slice(&n))
-            .collect(),
-        block_hash: H256::from_slice(&execution_update.block_hash),
-        block_hash_branch: execution_update
-            .block_hash_branch
-            .into_iter()
-            .map(|n| H256::from_slice(&n))
-            .collect(),
-    }
+        block_number_branch: try_to_h256_vec(
+            "block_number_branch",
+            execution_update.block_number_branch,
+        )?,
+        block_hash: try_to_h256("block_hash", &execution_update.block_hash)?,
+        block_hash_branch: try_to_h256_vec("block_hash_branch", execution_update.block_hash_branch)?,
+    })
 }
 
 /// Converts an execution update to the Protocol Buffer type.
@@ -428,11 +438,10 @@ pub fn convert_proto_to_consensus_update<const SYNC_COMMITTEE_SIZE: usize>(
             .ok_or(Error::proto_missing("finalized_header"))?,
     )?;
 
-    let finalized_execution_branch = consensus_update
-        .finalized_execution_branch
-        .into_iter()
-        .map(|b| H256::from_slice(&b))
-        .collect::<Vec<H256>>();
+    let finalized_execution_branch = try_to_h256_vec(
+        "finalized_execution_branch",
+        consensus_update.finalized_execution_branch,
+    )?;
     let consensus_update = ConsensusUpdateInfo {
         attested_header,
         next_sync_committee: if consensus_update.next_sync_committee.is_none()
@@ -465,12 +474,12 @@ pub fn convert_proto_to_consensus_update<const SYNC_COMMITTEE_SIZE: usize>(
                             .aggregate_pubkey,
                     )?,
                 },
-                decode_branch(consensus_update.next_sync_committee_branch),
+                decode_branch(consensus_update.next_sync_committee_branch)?,
             ))
         },
         finalized_header: (
             finalized_header,
-            decode_branch(consensus_update.finalized_header_branch),
+            decode_branch(consensus_update.finalized_header_branch)?,
         ),
         sync_aggregate: convert_proto_sync_aggregate(
             consensus_update
@@ -478,14 +487,17 @@ pub fn convert_proto_to_consensus_update<const SYNC_COMMITTEE_SIZE: usize>(
                 .ok_or(Error::proto_missing("sync_aggregate"))?,
         )?,
         signature_slot: consensus_update.signature_slot.into(),
-        finalized_execution_root: H256::from_slice(&consensus_update.finalized_execution_root),
+        finalized_execution_root: try_to_h256(
+            "finalized_execution_root",
+            &consensus_update.finalized_execution_root,
+        )?,
         finalized_execution_branch,
     };
     Ok(consensus_update)
 }
 
-pub(crate) fn decode_branch(bz: Vec<Vec<u8>>) -> Vec<H256> {
-    bz.into_iter().map(|b| H256::from_slice(&b)).collect()
+pub(crate) fn decode_branch(bz: Vec<Vec<u8>>) -> Result<Vec<H256>, Error> {
+    try_to_h256_vec("branch", bz)
 }
 
 #[cfg(test)]
@@ -539,7 +551,7 @@ mod tests {
         };
 
         let proto = convert_execution_update_to_proto(original.clone());
-        let converted = convert_proto_to_execution_update(proto);
+        let converted = convert_proto_to_execution_update(proto).unwrap();
 
         assert_eq!(original.state_root, converted.state_root);
         assert_eq!(original.state_root_branch, converted.state_root_branch);
@@ -559,7 +571,7 @@ mod tests {
     #[test]
     fn test_decode_branch() {
         let input = vec![vec![1u8; 32], vec![2u8; 32]];
-        let result = decode_branch(input);
+        let result = decode_branch(input).unwrap();
 
         assert_eq!(result.len(), 2);
         assert_eq!(result[0], h256_from_byte(1));
@@ -569,7 +581,7 @@ mod tests {
     #[test]
     fn test_decode_branch_empty() {
         let input: Vec<Vec<u8>> = vec![];
-        let result = decode_branch(input);
+        let result = decode_branch(input).unwrap();
         assert!(result.is_empty());
     }
 

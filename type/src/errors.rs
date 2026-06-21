@@ -122,6 +122,8 @@ pub enum Error {
     },
     #[error("proto missing field: {field}")]
     ProtoMissingField { field: String },
+    #[error("invalid H256 length for field {field}: expected 32, got {got}")]
+    InvalidH256Length { field: String, got: usize },
 
     // ========================================================================
     // External library errors (with impl From)
