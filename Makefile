@@ -37,5 +37,5 @@ fmt:
 .PHONY: lint
 lint:
 	@$(MAKE) CARGO_FMT_OPT=--check fmt
-	@cargo clippy --locked --tests $(CARGO_TARGET) -- -D warnings
+	@cargo clippy --tests $(CARGO_TARGET) -- -D warnings
 	@cargo machete
