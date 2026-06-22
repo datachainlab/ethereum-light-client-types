@@ -128,8 +128,8 @@ impl<const SYNC_COMMITTEE_SIZE: usize, CS: TrustedSyncCommitteeInfo>
                 })
             } else {
                 Err(Error::InvalidCurrentSyncCommitteeKeys {
-                    expected: update_sync_committee.aggregate_pubkey,
-                    actual: trusted_sync_committee_info.current_sync_committee(),
+                    expected: trusted_sync_committee_info.current_sync_committee(),
+                    actual: update_sync_committee.aggregate_pubkey,
                 })
             };
         }
@@ -144,8 +144,8 @@ impl<const SYNC_COMMITTEE_SIZE: usize, CS: TrustedSyncCommitteeInfo>
             })
         } else {
             Err(Error::InvalidNextSyncCommitteeKeys {
-                expected: update_sync_committee.aggregate_pubkey,
-                actual: trusted_sync_committee_info.next_sync_committee(),
+                expected: trusted_sync_committee_info.next_sync_committee(),
+                actual: update_sync_committee.aggregate_pubkey,
             })
         }
     }
