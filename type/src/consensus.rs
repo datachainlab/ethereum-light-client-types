@@ -191,8 +191,10 @@ impl<const SYNC_COMMITTEE_SIZE: usize> TryFrom<ProtoTrustedSyncCommittee>
                 aggregate_pubkey: PublicKey::try_from(
                     value
                         .sync_committee
+                        .as_ref()
                         .ok_or(Error::proto_missing("sync_committee"))?
-                        .aggregate_pubkey,
+                        .aggregate_pubkey
+                        .clone(),
                 )?,
             },
             is_next: value.is_next,
