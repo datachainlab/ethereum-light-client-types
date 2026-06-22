@@ -53,7 +53,7 @@ func (f *HTTPFetcher) Get(ctx context.Context, path string, result any) error {
 		log.GetLogger().DebugContext(ctx, "Non 2xx response to Beacon API request", "endpoint", f.endpoint+path, "status code", r.StatusCode, "response body", string(bz))
 		return fmt.Errorf("request returned status code %d", r.StatusCode)
 	}
-	return json.Unmarshal(bz, &result)
+	return json.Unmarshal(bz, result)
 }
 
 type Client struct {
