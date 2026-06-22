@@ -53,9 +53,6 @@ func (u *ExecutionUpdate) ValidateBasic() error {
 	if u.StateRootBranch == nil {
 		return fmt.Errorf("state root branch cannot be nil")
 	}
-	if u.BlockNumber == 0 {
-		return fmt.Errorf("block number cannot be zero")
-	}
 	if u.BlockNumberBranch == nil {
 		return fmt.Errorf("block number branch cannot be nil")
 	}
