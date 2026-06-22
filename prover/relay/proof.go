@@ -40,7 +40,7 @@ func BuildAccountUpdate(ctx context.Context, proofClient ProofClient, ibcAddress
 		ctx,
 		ibcAddress,
 		nil,
-		big.NewInt(int64(blockNumber)),
+		new(big.Int).SetUint64(blockNumber),
 	)
 	if err != nil {
 		return nil, err
