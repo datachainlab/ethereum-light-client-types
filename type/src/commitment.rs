@@ -40,12 +40,14 @@ pub fn calculate_ibc_commitment_storage_location(ibc_commitments_slot: &H256, pa
 pub fn decode_eip1184_rlp_proof(proof: Vec<u8>) -> Result<Vec<Vec<u8>>, Error> {
     let r = Rlp::new(&proof);
     if r.is_list() {
-        Ok(r.into_iter()
+        r.into_iter()
             .map(|r| {
-                let proof: Vec<Vec<u8>> = r.as_list().unwrap();
-                rlp::encode_list::<Vec<u8>, Vec<u8>>(&proof).into()
+                let node: Vec<Vec<u8>> = r.as_list().map_err(|e| Error::InvalidProofFormat {
+                    message: alloc::format!("proof node must be an rlp list: {:?}", e),
+                })?;
+                Ok(rlp::encode_list::<Vec<u8>, Vec<u8>>(&node).into())
             })
-            .collect())
+            .collect()
     } else {
         Err(Error::InvalidProofFormat {
             message: "proof must be rlp list".into(),

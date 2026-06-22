@@ -310,14 +310,20 @@ pub fn convert_proto_to_execution_update(
 ) -> Result<ExecutionUpdateInfo, Error> {
     Ok(ExecutionUpdateInfo {
         state_root: try_to_h256("execution_update.state_root", &execution_update.state_root)?,
-        state_root_branch: try_to_h256_vec("state_root_branch", execution_update.state_root_branch)?,
+        state_root_branch: try_to_h256_vec(
+            "state_root_branch",
+            execution_update.state_root_branch,
+        )?,
         block_number: execution_update.block_number.into(),
         block_number_branch: try_to_h256_vec(
             "block_number_branch",
             execution_update.block_number_branch,
         )?,
         block_hash: try_to_h256("block_hash", &execution_update.block_hash)?,
-        block_hash_branch: try_to_h256_vec("block_hash_branch", execution_update.block_hash_branch)?,
+        block_hash_branch: try_to_h256_vec(
+            "block_hash_branch",
+            execution_update.block_hash_branch,
+        )?,
     })
 }
 
