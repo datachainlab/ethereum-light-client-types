@@ -120,6 +120,11 @@ pub enum Error {
         sync_committee_size: usize,
         sync_committee_bits: Vec<u8>,
     },
+    #[error("serialize sync committee bits: {error:?} sync_committee_size={sync_committee_size}")]
+    SerializeSyncCommitteeBits {
+        error: ssz_rs::SerializeError,
+        sync_committee_size: usize,
+    },
     #[error("proto missing field: {field}")]
     ProtoMissingField { field: String },
     #[error("invalid H256 length for field {field}: expected 32, got {got}")]

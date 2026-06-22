@@ -357,18 +357,22 @@ pub fn convert_execution_update_to_proto(
 
 /// Converts a sync aggregate to the Protocol Buffer type.
 ///
-/// # Panics
+/// # Errors
 ///
-/// Panics if `SYNC_COMMITTEE_SIZE` is 0.
+/// Returns an error if serialization of `sync_committee_bits` fails (e.g. if `SYNC_COMMITTEE_SIZE` is 0).
 pub fn convert_sync_aggregate_to_proto<const SYNC_COMMITTEE_SIZE: usize>(
     sync_aggregate: SyncAggregate<SYNC_COMMITTEE_SIZE>,
-) -> ProtoSyncAggregate {
-    let sync_committee_bits = ssz_rs::serialize(&sync_aggregate.sync_committee_bits)
-        .expect("failed to serialize sync_committee_bits: this should never happen unless `SYNC_COMMITTEE_SIZE` is 0");
-    ProtoSyncAggregate {
+) -> Result<ProtoSyncAggregate, Error> {
+    let sync_committee_bits = ssz_rs::serialize(&sync_aggregate.sync_committee_bits).map_err(
+        |e| Error::SerializeSyncCommitteeBits {
+            error: e,
+            sync_committee_size: SYNC_COMMITTEE_SIZE,
+        },
+    )?;
+    Ok(ProtoSyncAggregate {
         sync_committee_bits,
         sync_committee_signature: sync_aggregate.sync_committee_signature.0.to_vec(),
-    }
+    })
 }
 
 pub(crate) fn convert_proto_sync_aggregate<const SYNC_COMMITTEE_SIZE: usize>(
@@ -388,13 +392,17 @@ pub(crate) fn convert_proto_sync_aggregate<const SYNC_COMMITTEE_SIZE: usize>(
 }
 
 /// Converts a consensus update to the Protocol Buffer type.
+///
+/// # Errors
+///
+/// Returns an error if serialization of the sync aggregate bits fails.
 pub fn convert_consensus_update_to_proto<const SYNC_COMMITTEE_SIZE: usize>(
     consensus_update: ConsensusUpdateInfo<SYNC_COMMITTEE_SIZE>,
-) -> ProtoConsensusUpdate {
+) -> Result<ProtoConsensusUpdate, Error> {
     let finalized_beacon_header_branch = consensus_update.finalized_beacon_header_branch();
     let sync_aggregate = consensus_update.sync_aggregate.clone();
 
-    ProtoConsensusUpdate {
+    Ok(ProtoConsensusUpdate {
         attested_header: Some(convert_header_to_proto(&consensus_update.attested_header)),
         next_sync_committee: consensus_update.next_sync_committee.clone().map(|c| {
             ProtoSyncCommittee {
@@ -420,9 +428,9 @@ pub fn convert_consensus_update_to_proto<const SYNC_COMMITTEE_SIZE: usize>(
             .into_iter()
             .map(|n| n.as_bytes().to_vec())
             .collect(),
-        sync_aggregate: Some(convert_sync_aggregate_to_proto(sync_aggregate)),
+        sync_aggregate: Some(convert_sync_aggregate_to_proto(sync_aggregate)?),
         signature_slot: consensus_update.signature_slot.into(),
-    }
+    })
 }
 
 /// Converts a Protocol Buffer consensus update to the domain type.
@@ -699,7 +707,7 @@ mod tests {
     #[test]
     fn test_sync_aggregate_proto_roundtrip() {
         let original = SyncAggregate::<TEST_SYNC_COMMITTEE_SIZE>::default();
-        let proto = convert_sync_aggregate_to_proto(original.clone());
+        let proto = convert_sync_aggregate_to_proto(original.clone()).unwrap();
         let converted = convert_proto_sync_aggregate::<TEST_SYNC_COMMITTEE_SIZE>(proto).unwrap();
 
         assert_eq!(original.sync_committee_bits, converted.sync_committee_bits);
@@ -736,7 +744,7 @@ mod tests {
             finalized_execution_branch: vec![h256_from_byte(10)],
         };
 
-        let proto = convert_consensus_update_to_proto(original.clone());
+        let proto = convert_consensus_update_to_proto(original.clone()).unwrap();
         let converted =
             convert_proto_to_consensus_update::<TEST_SYNC_COMMITTEE_SIZE>(proto).unwrap();
 
@@ -864,7 +872,7 @@ mod tests {
             finalized_execution_branch: vec![],
         };
 
-        let proto = convert_consensus_update_to_proto(original.clone());
+        let proto = convert_consensus_update_to_proto(original.clone()).unwrap();
 
         // Verify proto has next_sync_committee
         assert!(proto.next_sync_committee.is_some());
