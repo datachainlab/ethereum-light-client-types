@@ -13,7 +13,9 @@ use light_client::types::Time;
 
 /// Creates a [`Time`] from a Unix timestamp in seconds.
 pub fn new_timestamp(second: u64) -> Result<Time, Error> {
-    Time::from_unix_timestamp(second as i64, 0).map_err(Error::Time)
+    let second_i64 =
+        i64::try_from(second).map_err(|_| Error::TimestampOverflow { value: second })?;
+    Time::from_unix_timestamp(second_i64, 0).map_err(Error::Time)
 }
 
 /// Validates that the trusted consensus state is still within the trusting period.

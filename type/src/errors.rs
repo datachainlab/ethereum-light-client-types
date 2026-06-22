@@ -106,6 +106,8 @@ pub enum Error {
     },
     #[error("zero timestamp")]
     ZeroTimestamp,
+    #[error("timestamp overflow: value={value}")]
+    TimestampOverflow { value: u64 },
     #[error("unexpected header timestamp: expected={expected} actual={actual}")]
     UnexpectedTimestamp { expected: Time, actual: Time },
 
