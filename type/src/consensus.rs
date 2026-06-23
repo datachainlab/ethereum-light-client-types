@@ -363,12 +363,13 @@ pub fn convert_execution_update_to_proto(
 pub fn convert_sync_aggregate_to_proto<const SYNC_COMMITTEE_SIZE: usize>(
     sync_aggregate: SyncAggregate<SYNC_COMMITTEE_SIZE>,
 ) -> Result<ProtoSyncAggregate, Error> {
-    let sync_committee_bits = ssz_rs::serialize(&sync_aggregate.sync_committee_bits).map_err(
-        |e| Error::SerializeSyncCommitteeBits {
-            error: e,
-            sync_committee_size: SYNC_COMMITTEE_SIZE,
-        },
-    )?;
+    let sync_committee_bits =
+        ssz_rs::serialize(&sync_aggregate.sync_committee_bits).map_err(|e| {
+            Error::SerializeSyncCommitteeBits {
+                error: e,
+                sync_committee_size: SYNC_COMMITTEE_SIZE,
+            }
+        })?;
     Ok(ProtoSyncAggregate {
         sync_committee_bits,
         sync_committee_signature: sync_aggregate.sync_committee_signature.0.to_vec(),
