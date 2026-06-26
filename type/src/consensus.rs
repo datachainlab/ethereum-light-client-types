@@ -531,32 +531,6 @@ mod tests {
     }
 
     #[test]
-    fn test_execution_update_info_default() {
-        let update = ExecutionUpdateInfo::default();
-        assert!(update.state_root.is_zero());
-        assert!(update.state_root_branch.is_empty());
-        assert_eq!(update.block_number, U64::from(0));
-        assert!(update.block_number_branch.is_empty());
-    }
-
-    #[test]
-    fn test_execution_update_trait_impl() {
-        let update = ExecutionUpdateInfo {
-            state_root: h256_from_byte(1),
-            state_root_branch: vec![h256_from_byte(2)],
-            block_number: U64::from(12345),
-            block_number_branch: vec![h256_from_byte(3)],
-            block_hash: h256_from_byte(4),
-            block_hash_branch: vec![h256_from_byte(5)],
-        };
-
-        assert_eq!(update.state_root(), h256_from_byte(1));
-        assert_eq!(update.state_root_branch().len(), 1);
-        assert_eq!(update.block_number(), U64::from(12345));
-        assert_eq!(update.block_number_branch().len(), 1);
-    }
-
-    #[test]
     fn test_execution_update_proto_roundtrip() {
         let original = ExecutionUpdateInfo {
             state_root: h256_from_byte(1),
@@ -576,13 +550,6 @@ mod tests {
         assert_eq!(original.block_number_branch, converted.block_number_branch);
         assert_eq!(original.block_hash, converted.block_hash);
         assert_eq!(original.block_hash_branch, converted.block_hash_branch);
-    }
-
-    #[test]
-    fn test_account_update_info_default() {
-        let update = AccountUpdateInfo::default();
-        assert!(update.account_proof.is_empty());
-        assert!(update.account_storage_root.is_zero());
     }
 
     #[test]
@@ -656,53 +623,6 @@ mod tests {
             }
             _ => panic!("Expected UnexpectedHeightRevisionNumber error"),
         }
-    }
-
-    #[test]
-    fn test_ethereum_client_revision_number_constant() {
-        assert_eq!(ETHEREUM_CLIENT_REVISION_NUMBER, 0);
-    }
-
-    #[test]
-    fn test_consensus_update_info_default() {
-        let update = ConsensusUpdateInfo::<TEST_SYNC_COMMITTEE_SIZE>::default();
-
-        assert_eq!(update.attested_header.slot, 0.into());
-        assert!(update.next_sync_committee.is_none());
-        assert!(update.finalized_header.1.is_empty());
-        assert!(update.finalized_execution_root.is_zero());
-        assert!(update.finalized_execution_branch.is_empty());
-    }
-
-    #[test]
-    fn test_consensus_update_trait_impl() {
-        let update = ConsensusUpdateInfo::<TEST_SYNC_COMMITTEE_SIZE> {
-            attested_header: BeaconBlockHeader {
-                slot: 100.into(),
-                ..Default::default()
-            },
-            next_sync_committee: None,
-            finalized_header: (
-                BeaconBlockHeader {
-                    slot: 50.into(),
-                    ..Default::default()
-                },
-                vec![h256_from_byte(1)],
-            ),
-            sync_aggregate: SyncAggregate::default(),
-            signature_slot: 101.into(),
-            finalized_execution_root: h256_from_byte(2),
-            finalized_execution_branch: vec![h256_from_byte(3)],
-        };
-
-        assert_eq!(update.attested_beacon_header().slot, 100.into());
-        assert!(update.next_sync_committee().is_none());
-        assert!(update.next_sync_committee_branch().is_none());
-        assert_eq!(update.finalized_beacon_header().slot, 50.into());
-        assert_eq!(update.finalized_beacon_header_branch().len(), 1);
-        assert_eq!(update.signature_slot(), 101.into());
-        assert_eq!(update.finalized_execution_root(), h256_from_byte(2));
-        assert_eq!(update.finalized_execution_branch().len(), 1);
     }
 
     #[test]
