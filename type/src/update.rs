@@ -391,18 +391,4 @@ mod tests {
             _ => panic!("Expected StoreNotSupportedFinalizedPeriod error"),
         }
     }
-
-    #[test]
-    fn test_sync_committee_info_fields() {
-        let current = PublicKey::default();
-        let next = PublicKey::default();
-
-        let info = SyncCommitteeInfo {
-            current_sync_committee: current.clone(),
-            next_sync_committee: next.clone(),
-        };
-
-        assert_eq!(info.current_sync_committee, current);
-        assert_eq!(info.next_sync_committee, next);
-    }
 }

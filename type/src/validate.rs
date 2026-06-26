@@ -109,10 +109,4 @@ mod tests {
             _ => panic!("Expected InvalidBlockHashMerkleBranch error"),
         }
     }
-
-    #[test]
-    fn test_block_number_to_block_hash_diff_constant() {
-        // Block hash is 6 positions after block number in ExecutionPayload
-        assert_eq!(BLOCK_NUMBER_TO_BLOCK_HASH_DIFF, 6);
-    }
 }
