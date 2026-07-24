@@ -7,13 +7,21 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 
-	"github.com/datachainlab/ethereum-ibc-relay-chain/pkg/client"
 	lctypes "github.com/datachainlab/ethereum-light-client-types/prover/types"
 )
 
+// StateProof is the result of an eth_getProof call, containing the
+// RLP-encoded account proof, the account's storage hash and the
+// RLP-encoded storage proofs for the requested storage keys.
+type StateProof struct {
+	StorageHash     [32]byte
+	AccountProofRLP []byte
+	StorageProofRLP [][]byte
+}
+
 // ProofClient abstracts the eth_getProof RPC operations
 type ProofClient interface {
-	GetProof(ctx context.Context, address common.Address, storageKeys [][]byte, blockNumber *big.Int) (*client.StateProof, error)
+	GetProof(ctx context.Context, address common.Address, storageKeys [][]byte, blockNumber *big.Int) (*StateProof, error)
 }
 
 // ibcCommitmentsSlot is the storage slot for IBC commitments mapping in the IBC handler contract.

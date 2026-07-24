@@ -3,38 +3,32 @@
 //! This module provides functions for validating timestamps in the context
 //! of light client operations, including trusting period checks and
 //! clock drift tolerance.
+//!
+//! All timestamps are Unix timestamps in nanoseconds so that this crate does
+//! not depend on any specific light client framework's time type.
 
 use crate::errors::Error;
 use core::time::Duration;
 use ethereum_consensus::beacon::Slot;
 use ethereum_consensus::compute::compute_timestamp_at_slot;
 use ethereum_consensus::context::ChainContext;
-use light_client::types::Time;
-
-/// Creates a [`Time`] from a Unix timestamp in seconds.
-pub fn new_timestamp(second: u64) -> Result<Time, Error> {
-    let second_i64 =
-        i64::try_from(second).map_err(|_| Error::TimestampOverflow { value: second })?;
-    Time::from_unix_timestamp(second_i64, 0).map_err(Error::Time)
-}
 
 /// Validates that the trusted consensus state is still within the trusting period.
 pub fn validate_state_timestamp_within_trusting_period(
-    current_timestamp: Time,
+    current_timestamp_nanos: u128,
     trusting_period: Duration,
-    trusted_consensus_state_timestamp: Time,
+    trusted_consensus_state_timestamp_nanos: u128,
 ) -> Result<(), Error> {
-    if current_timestamp.lt(&trusted_consensus_state_timestamp) {
+    if current_timestamp_nanos < trusted_consensus_state_timestamp_nanos {
         return Err(Error::CurrentTimeBeforeTrustedState {
-            current: current_timestamp,
-            trusted: trusted_consensus_state_timestamp,
+            current: current_timestamp_nanos,
+            trusted: trusted_consensus_state_timestamp_nanos,
         });
     }
-    let trusting_period_end =
-        (trusted_consensus_state_timestamp + trusting_period).map_err(Error::Time)?;
-    if !trusting_period_end.gt(&current_timestamp) {
+    let trusting_period_end = trusted_consensus_state_timestamp_nanos + trusting_period.as_nanos();
+    if trusting_period_end <= current_timestamp_nanos {
         return Err(Error::OutOfTrustingPeriod {
-            current_timestamp,
+            current_timestamp: current_timestamp_nanos,
             trusting_period_end,
         });
     }
@@ -43,16 +37,16 @@ pub fn validate_state_timestamp_within_trusting_period(
 
 /// Validates that the header timestamp is not in the future, allowing for `clock_drift`.
 pub fn validate_header_timestamp_not_future(
-    current_timestamp: Time,
+    current_timestamp_nanos: u128,
     clock_drift: Duration,
-    untrusted_header_timestamp: Time,
+    untrusted_header_timestamp_nanos: u128,
 ) -> Result<(), Error> {
-    let drifted_current_timestamp = (current_timestamp + clock_drift).map_err(Error::Time)?;
-    if !drifted_current_timestamp.gt(&untrusted_header_timestamp) {
+    let drifted_current_timestamp = current_timestamp_nanos + clock_drift.as_nanos();
+    if drifted_current_timestamp <= untrusted_header_timestamp_nanos {
         return Err(Error::HeaderFromFuture {
-            current_timestamp,
+            current_timestamp: current_timestamp_nanos,
             clock_drift,
-            header_timestamp: untrusted_header_timestamp,
+            header_timestamp: untrusted_header_timestamp_nanos,
         });
     }
     Ok(())
@@ -63,19 +57,24 @@ pub fn validate_header_timestamp_not_future(
 pub fn validate_header_timestamp<C: ChainContext>(
     ctx: &C,
     finalized_slot: Slot,
-    header_timestamp: Time,
+    header_timestamp_nanos: u128,
 ) -> Result<(), Error> {
-    if header_timestamp.as_unix_timestamp_nanos() == 0 {
+    if header_timestamp_nanos == 0 {
         return Err(Error::ZeroTimestamp);
     }
-    let expected = new_timestamp(compute_timestamp_at_slot(ctx, finalized_slot).0)?;
-    if header_timestamp.as_unix_timestamp_nanos() != expected.as_unix_timestamp_nanos() {
+    let expected = secs_to_nanos(compute_timestamp_at_slot(ctx, finalized_slot).0);
+    if header_timestamp_nanos != expected {
         return Err(Error::UnexpectedTimestamp {
             expected,
-            actual: header_timestamp,
+            actual: header_timestamp_nanos,
         });
     }
     Ok(())
+}
+
+/// Converts a Unix timestamp in seconds to nanoseconds.
+pub const fn secs_to_nanos(secs: u64) -> u128 {
+    secs as u128 * 1_000_000_000
 }
 
 #[cfg(test)]
@@ -112,16 +111,15 @@ mod tests {
         let ctx = test_context();
         let slot = Slot::from(10u64);
         let expected_secs = compute_timestamp_at_slot(&ctx, slot).0;
-        let header_timestamp = new_timestamp(expected_secs).unwrap();
+        let header_timestamp = secs_to_nanos(expected_secs);
         assert!(validate_header_timestamp(&ctx, slot, header_timestamp).is_ok());
     }
 
     #[test]
     fn test_validate_header_timestamp_zero() {
         let ctx = test_context();
-        let header_timestamp = Time::from_unix_timestamp_nanos(0).unwrap();
         assert!(matches!(
-            validate_header_timestamp(&ctx, Slot::from(10u64), header_timestamp),
+            validate_header_timestamp(&ctx, Slot::from(10u64), 0),
             Err(Error::ZeroTimestamp)
         ));
     }
@@ -132,7 +130,7 @@ mod tests {
         let slot = Slot::from(10u64);
         // off by one second from the slot-derived timestamp
         let expected_secs = compute_timestamp_at_slot(&ctx, slot).0;
-        let header_timestamp = new_timestamp(expected_secs + 1).unwrap();
+        let header_timestamp = secs_to_nanos(expected_secs + 1);
         assert!(matches!(
             validate_header_timestamp(&ctx, slot, header_timestamp),
             Err(Error::UnexpectedTimestamp { .. })
@@ -140,21 +138,15 @@ mod tests {
     }
 
     #[test]
-    fn test_new_timestamp() {
-        let ts = new_timestamp(1000).unwrap();
-        assert_eq!(ts.as_unix_timestamp_secs(), 1000);
-    }
-
-    #[test]
-    fn test_new_timestamp_zero() {
-        let ts = new_timestamp(0).unwrap();
-        assert_eq!(ts.as_unix_timestamp_secs(), 0);
+    fn test_secs_to_nanos() {
+        assert_eq!(secs_to_nanos(1000), 1_000_000_000_000);
+        assert_eq!(secs_to_nanos(0), 0);
     }
 
     #[test]
     fn test_validate_within_trusting_period_success() {
-        let trusted = new_timestamp(1000).unwrap();
-        let current = new_timestamp(1500).unwrap();
+        let trusted = secs_to_nanos(1000);
+        let current = secs_to_nanos(1500);
         let trusting_period = Duration::from_secs(1000);
 
         let result =
@@ -164,8 +156,8 @@ mod tests {
 
     #[test]
     fn test_validate_within_trusting_period_expired() {
-        let trusted = new_timestamp(1000).unwrap();
-        let current = new_timestamp(3000).unwrap();
+        let trusted = secs_to_nanos(1000);
+        let current = secs_to_nanos(3000);
         let trusting_period = Duration::from_secs(1000);
 
         let result =
@@ -179,8 +171,8 @@ mod tests {
 
     #[test]
     fn test_validate_within_trusting_period_current_before_trusted() {
-        let trusted = new_timestamp(2000).unwrap();
-        let current = new_timestamp(1000).unwrap();
+        let trusted = secs_to_nanos(2000);
+        let current = secs_to_nanos(1000);
         let trusting_period = Duration::from_secs(1000);
 
         let result =
@@ -194,8 +186,8 @@ mod tests {
 
     #[test]
     fn test_validate_within_trusting_period_exact_boundary() {
-        let trusted = new_timestamp(1000).unwrap();
-        let current = new_timestamp(2000).unwrap();
+        let trusted = secs_to_nanos(1000);
+        let current = secs_to_nanos(2000);
         let trusting_period = Duration::from_secs(1000);
 
         // At exact boundary (trusted + trusting_period == current), should fail
@@ -206,8 +198,8 @@ mod tests {
 
     #[test]
     fn test_validate_header_not_future_success() {
-        let current = new_timestamp(2000).unwrap();
-        let header = new_timestamp(1500).unwrap();
+        let current = secs_to_nanos(2000);
+        let header = secs_to_nanos(1500);
         let clock_drift = Duration::from_secs(100);
 
         let result = validate_header_timestamp_not_future(current, clock_drift, header);
@@ -216,8 +208,8 @@ mod tests {
 
     #[test]
     fn test_validate_header_not_future_within_drift() {
-        let current = new_timestamp(2000).unwrap();
-        let header = new_timestamp(2050).unwrap();
+        let current = secs_to_nanos(2000);
+        let header = secs_to_nanos(2050);
         let clock_drift = Duration::from_secs(100);
 
         // Header is 50s in future, but drift allows 100s
@@ -227,8 +219,8 @@ mod tests {
 
     #[test]
     fn test_validate_header_not_future_exceeds_drift() {
-        let current = new_timestamp(2000).unwrap();
-        let header = new_timestamp(2200).unwrap();
+        let current = secs_to_nanos(2000);
+        let header = secs_to_nanos(2200);
         let clock_drift = Duration::from_secs(100);
 
         // Header is 200s in future, but drift only allows 100s
@@ -242,8 +234,8 @@ mod tests {
 
     #[test]
     fn test_validate_header_not_future_exact_boundary() {
-        let current = new_timestamp(2000).unwrap();
-        let header = new_timestamp(2100).unwrap();
+        let current = secs_to_nanos(2000);
+        let header = secs_to_nanos(2100);
         let clock_drift = Duration::from_secs(100);
 
         // At exact boundary (current + drift == header), should fail

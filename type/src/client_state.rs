@@ -1,7 +1,7 @@
 //! Client state trait for Ethereum light client.
 
+use crate::height::Height;
 use ethereum_consensus::types::H256;
-use light_client::types::Height;
 
 /// Trait representing the state of an Ethereum light client.
 ///

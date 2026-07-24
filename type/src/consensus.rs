@@ -6,13 +6,13 @@
 
 use crate::commitment::decode_eip1184_rlp_proof;
 use crate::errors::Error;
+use crate::height::Height;
 use alloc::string::String;
 use alloc::vec::Vec;
 use ethereum_consensus::beacon::{BeaconBlockHeader, Slot};
 use ethereum_consensus::bls::{PublicKey, Signature};
 use ethereum_consensus::sync_protocol::{SyncAggregate, SyncCommittee};
 use ethereum_consensus::types::{H256, U64};
-use ethereum_light_client_proto::ibc::core::client::v1::Height as ProtoHeight;
 use ethereum_light_client_proto::ibc::lightclients::ethereum::v1::{
     AccountUpdate as ProtoAccountUpdate, BeaconBlockHeader as ProtoBeaconBlockHeader,
     ConsensusUpdate as ProtoConsensusUpdate, ExecutionUpdate as ProtoExecutionUpdate,
@@ -20,7 +20,6 @@ use ethereum_light_client_proto::ibc::lightclients::ethereum::v1::{
     TrustedSyncCommittee as ProtoTrustedSyncCommittee,
 };
 use ethereum_light_client_verifier::updates::{ConsensusUpdate, ExecutionUpdate};
-use light_client::types::Height;
 use ssz_rs::{Bitvector, Deserialize, Vector};
 
 /// The revision number for Ethereum client heights.
@@ -172,10 +171,7 @@ impl<const SYNC_COMMITTEE_SIZE: usize> TryFrom<ProtoTrustedSyncCommittee>
             .as_ref()
             .ok_or(Error::proto_missing("trusted_height"))?;
         Ok(TrustedSyncCommittee {
-            height: Height::new(
-                trusted_height.revision_number,
-                trusted_height.revision_height,
-            ),
+            height: trusted_height.clone().into(),
             sync_committee: SyncCommittee {
                 pubkeys: Vector::<PublicKey, SYNC_COMMITTEE_SIZE>::from_iter(
                     value
@@ -207,10 +203,7 @@ impl<const SYNC_COMMITTEE_SIZE: usize> From<TrustedSyncCommittee<SYNC_COMMITTEE_
 {
     fn from(value: TrustedSyncCommittee<SYNC_COMMITTEE_SIZE>) -> Self {
         Self {
-            trusted_height: Some(ProtoHeight {
-                revision_number: value.height.revision_number(),
-                revision_height: value.height.revision_height(),
-            }),
+            trusted_height: Some(value.height.into()),
             sync_committee: Some(ProtoSyncCommittee {
                 pubkeys: value
                     .sync_committee
@@ -521,6 +514,7 @@ pub(crate) fn decode_branch(bz: Vec<Vec<u8>>) -> Result<Vec<H256>, Error> {
 mod tests {
     use super::*;
     use alloc::vec;
+    use ethereum_light_client_proto::ibc::core::client::v1::Height as ProtoHeight;
 
     // Common test constants
     const TEST_SYNC_COMMITTEE_SIZE: usize = 32;

@@ -1,8 +1,10 @@
 //! Type definitions for Ethereum light client in the IBC ecosystem.
 //!
 //! This crate provides core types and utilities for implementing an Ethereum
-//! light client that integrates with the IBC (Inter-Blockchain Communication)
-//! protocol through the LCP (Light Client Protocol) framework.
+//! light client for the IBC (Inter-Blockchain Communication) protocol.
+//! It is framework-agnostic: timestamps are plain unix nanoseconds and heights
+//! are a self-contained [`height::Height`], so light client frameworks such as
+//! LCP can integrate via thin conversions on their side.
 //!
 //! # Modules
 //!
@@ -26,6 +28,7 @@ pub mod commitment;
 pub mod consensus;
 pub mod consensus_state;
 pub mod errors;
+pub mod height;
 pub mod membership;
 pub mod time;
 pub mod update;
