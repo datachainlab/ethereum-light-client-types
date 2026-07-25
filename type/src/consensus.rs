@@ -7,15 +7,18 @@
 use crate::commitment::decode_eip1184_rlp_proof;
 use crate::errors::Error;
 use crate::height::Height;
+use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
-use ethereum_consensus::beacon::{BeaconBlockHeader, Slot};
+use ethereum_consensus::beacon::{BeaconBlockHeader, Slot, Version};
 use ethereum_consensus::bls::{PublicKey, Signature};
+use ethereum_consensus::fork::{ForkParameter, ForkParameters, ForkSpec};
 use ethereum_consensus::sync_protocol::{SyncAggregate, SyncCommittee};
 use ethereum_consensus::types::{H256, U64};
 use ethereum_light_client_proto::ibc::lightclients::ethereum::v1::{
     AccountUpdate as ProtoAccountUpdate, BeaconBlockHeader as ProtoBeaconBlockHeader,
     ConsensusUpdate as ProtoConsensusUpdate, ExecutionUpdate as ProtoExecutionUpdate,
+    ForkParameters as ProtoForkParameters, ForkSpec as ProtoForkSpec,
     SyncAggregate as ProtoSyncAggregate, SyncCommittee as ProtoSyncCommittee,
     TrustedSyncCommittee as ProtoTrustedSyncCommittee,
 };
@@ -300,6 +303,59 @@ pub(crate) fn convert_header_to_proto(header: &BeaconBlockHeader) -> ProtoBeacon
 }
 
 /// Converts a Protocol Buffer execution update to the domain type.
+/// Converts a protobuf `ForkParameters` into the consensus-layer representation.
+///
+/// # Errors
+///
+/// - [`Error::InvalidVersionLength`]: A fork version is not 4 bytes
+/// - [`Error::ProtoMissingField`]: A fork entry is missing its spec
+/// - [`Error::EthereumConsensus`]: The fork parameters are inconsistent
+pub fn convert_proto_to_fork_parameters(
+    value: ProtoForkParameters,
+) -> Result<ForkParameters, Error> {
+    fn to_version(field: &str, bz: &[u8]) -> Result<Version, Error> {
+        if bz.len() != 4 {
+            return Err(Error::InvalidVersionLength {
+                field: field.into(),
+                got: bz.len(),
+            });
+        }
+        let mut version = Version::default();
+        version.0.copy_from_slice(bz);
+        Ok(version)
+    }
+
+    fn to_fork_spec(idx: usize, spec: Option<ProtoForkSpec>) -> Result<ForkSpec, Error> {
+        let spec = spec.ok_or_else(|| Error::ProtoMissingField {
+            field: format!("forks[{idx}].spec"),
+        })?;
+        Ok(ForkSpec {
+            finalized_root_gindex: spec.finalized_root_gindex,
+            current_sync_committee_gindex: spec.current_sync_committee_gindex,
+            next_sync_committee_gindex: spec.next_sync_committee_gindex,
+            execution_payload_gindex: spec.execution_payload_gindex,
+            execution_payload_state_root_gindex: spec.execution_payload_state_root_gindex,
+            execution_payload_block_number_gindex: spec.execution_payload_block_number_gindex,
+        })
+    }
+
+    Ok(ForkParameters::new(
+        to_version("genesis_fork_version", &value.genesis_fork_version)?,
+        value
+            .forks
+            .into_iter()
+            .enumerate()
+            .map(|(i, f)| {
+                Ok(ForkParameter::new(
+                    to_version(&format!("forks[{i}].version"), &f.version)?,
+                    f.epoch.into(),
+                    to_fork_spec(i, f.spec)?,
+                ))
+            })
+            .collect::<Result<Vec<_>, Error>>()?,
+    )?)
+}
+
 pub fn convert_proto_to_execution_update(
     execution_update: ProtoExecutionUpdate,
 ) -> Result<ExecutionUpdateInfo, Error> {
