@@ -29,8 +29,6 @@ pub enum Error {
     },
     #[error("unexpected height revision number: expected={expected} got={got}")]
     UnexpectedHeightRevisionNumber { expected: u64, got: u64 },
-    #[error("client is frozen: client_id={client_id}")]
-    ClientFrozen { client_id: String },
     #[error("unexpected proof height: proof_height={proof_height} latest_height={latest_height}")]
     UnexpectedProofHeight {
         proof_height: Height,
