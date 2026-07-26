@@ -23,15 +23,13 @@ import (
 )
 
 const (
-	// A mainnet sync committee period is ~27.3 hours, so the trusting period
-	// must comfortably exceed it: the trusted state is the period boundary.
+	// must exceed a mainnet sync committee period (~27.3 hours)
 	defaultTrustingPeriodSecs = 7 * 86400
 	defaultMaxClockDriftSecs  = 60
 )
 
-// ErrFinalityNotAdvanced is returned right after a sync committee period
-// boundary, while the finalized slot still equals the boundary slot.
-// Callers can retry after more slots are finalized.
+// ErrFinalityNotAdvanced is returned right after a period boundary; retry
+// after more slots are finalized.
 var ErrFinalityNotAdvanced = errors.New("finalized slot is not newer than the period boundary slot")
 
 // proofClient implements relay.ProofClient on top of a raw execution RPC client.
@@ -72,11 +70,9 @@ func (p proofClient) GetProof(ctx context.Context, address common.Address, stora
 	return proof, nil
 }
 
-// getClientState calls the IBC handler's getClientState(string) at the given
-// block and returns the client state bytes committed at
-// "clients/<clientID>/clientState".
+// getClientState returns the client state bytes committed at
+// "clients/<clientID>/clientState" via the IBC handler's getClientState(string).
 func getClientState(ctx context.Context, client *rpc.Client, ibcAddress common.Address, clientID string, blockNumber uint64) ([]byte, error) {
-	// abi-encode getClientState(string)
 	id := []byte(clientID)
 	idHex := fmt.Sprintf("%x", id)
 	data := fmt.Sprintf("0x76c81c42%064x%064x%s%s", 0x20, len(id), idHex, strings.Repeat("0", (64-len(idHex)%64)%64))
@@ -87,7 +83,6 @@ func getClientState(ctx context.Context, client *rpc.Client, ibcAddress common.A
 	}, hexutil.EncodeUint64(blockNumber)); err != nil {
 		return nil, fmt.Errorf("getClientState(%s) failed: %w", clientID, err)
 	}
-	// returns (bytes clientState, bool found)
 	if len(out) < 96 {
 		return nil, fmt.Errorf("unexpected getClientState result length: %d", len(out))
 	}
@@ -99,8 +94,8 @@ func getClientState(ctx context.Context, client *rpc.Client, ibcAddress common.A
 	return out[offset+32 : offset+32+length], nil
 }
 
-// encodeRLPProof converts hex-encoded proof nodes into a single RLP-encoded
-// list of nodes, the format expected by the light client verifier.
+// encodeRLPProof re-encodes hex proof nodes into the RLP list format expected
+// by the verifier.
 func encodeRLPProof(proof []string) ([]byte, error) {
 	var target [][][]byte
 	for _, p := range proof {
@@ -117,9 +112,8 @@ func encodeRLPProof(proof []string) ([]byte, error) {
 	return rlp.EncodeToBytes(target)
 }
 
-// detectNetwork determines the network from the beacon node's genesis fork
-// version. Anything other than mainnet/sepolia is treated as a minimal-preset
-// devnet.
+// detectNetwork determines the network from the genesis fork version;
+// anything other than mainnet/sepolia is treated as minimal.
 func detectNetwork(genesisForkVersion [4]byte) string {
 	switch genesisForkVersion {
 	case [4]byte{0x00, 0x00, 0x00, 0x00}:
@@ -131,8 +125,8 @@ func detectNetwork(genesisForkVersion [4]byte) string {
 	}
 }
 
-// fetchForkSchedule fetches the fork epochs from the beacon node's config
-// spec. A fork the node does not schedule is treated as never activating.
+// fetchForkSchedule fetches fork epochs from the beacon node's config spec;
+// an unscheduled fork is treated as never activating.
 func fetchForkSchedule(ctx context.Context, beaconEndpoint string) (map[string]uint64, error) {
 	const farFutureEpoch = ^uint64(0)
 
@@ -185,11 +179,9 @@ func fetchForkSchedule(ctx context.Context, beaconEndpoint string) (map[string]u
 	return schedule, nil
 }
 
-// BuildVerifyUpdateRequest builds a VerifyUpdateRequest from live beacon and
-// execution endpoints, mirroring how the relay prover assembles an update
-// header: the trusted state is the sync committee bootstrap at the current
-// period boundary, and the update is the latest light client update of the
-// same period.
+// BuildVerifyUpdateRequest builds a request from live endpoints: the trusted
+// state is the sync committee bootstrap at the period boundary, and the update
+// to verify is the latest finality update.
 func BuildVerifyUpdateRequest(
 	ctx context.Context,
 	beaconEndpoint, executionEndpoint string,
@@ -211,22 +203,18 @@ func BuildVerifyUpdateRequest(
 	finalizedSlot := uint64(finalityUpdate.Data.FinalizedHeader.Beacon.Slot)
 	period := relay.ComputeSyncCommitteePeriod(network, relay.ComputeEpoch(network, finalizedSlot))
 
-	// The consensus update to verify is the latest finality update; the
-	// execution update and timestamp are derived from its finalized header.
 	consensusUpdate := finalityUpdate.Data.ToProto()
 	executionUpdate, headerTimestamp, err := relay.BuildExecutionUpdateFromFinalizedHeader(&finalityUpdate.Data.FinalizedHeader, true)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build execution update: %w", err)
 	}
 
-	// The period's light client update snapshot provides the next sync
-	// committee of the trusted period.
+	// the period's update snapshot provides the trusted next sync committee
 	lcUpdate, err := beaconClient.GetLightClientUpdate(ctx, period)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get light client update for period %d: %w", period, err)
 	}
 
-	// Trusted state: the bootstrap sync committee at the period boundary.
 	bootstrapCommittee, err := relay.GetBootstrapInPeriod(ctx, beaconClient, network, period)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get bootstrap for period %d: %w", period, err)
@@ -237,7 +225,6 @@ func BuildVerifyUpdateRequest(
 	}
 	trustedTimestamp := genesis.GenesisTimeSeconds + trustedSlot*relay.SecondsPerSlot(network)
 
-	// Account update at the finalized execution block.
 	executionClient, err := rpc.DialContext(ctx, executionEndpoint)
 	if err != nil {
 		return nil, fmt.Errorf("failed to dial execution endpoint: %w", err)
@@ -248,7 +235,7 @@ func BuildVerifyUpdateRequest(
 		return nil, fmt.Errorf("failed to build account update: %w", err)
 	}
 
-	// Optionally prove membership of the client state commitment at the same block.
+	// optionally prove membership of the client state commitment
 	var membershipPath string
 	var membershipValue, membershipProof []byte
 	if ibcClientID != "" {
@@ -263,7 +250,7 @@ func BuildVerifyUpdateRequest(
 		}
 	}
 
-	// The fork schedule is only consulted for the minimal preset.
+	// the fork schedule is only consulted for the minimal preset
 	var schedule map[string]uint64
 	if network == relay.Minimal {
 		schedule, err = fetchForkSchedule(ctx, beaconEndpoint)

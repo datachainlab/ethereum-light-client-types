@@ -1,7 +1,7 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tonic_build::configure()
         .build_client(false)
-        // Reuse the canonical generated types instead of regenerating them.
+        // reuse the canonical generated types instead of regenerating them
         .extern_path(
             ".ibc.lightclients.ethereum.v1",
             "::ethereum_light_client_proto::ibc::lightclients::ethereum::v1",

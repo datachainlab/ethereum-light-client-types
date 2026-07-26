@@ -12,11 +12,9 @@ if [ ! -L "ibc" ] && [ ! -d "ibc" ]; then
     ln -s ../../proto/definitions/ibc ibc
 fi
 
-# Refresh the vendored third-party protos required by the Rust server's
-# build.rs: protoc needs the full import closure of ethereum.proto.
+# refresh the vendored import closure used by the Rust server's build.rs
 rm -rf third_party
 buf export . -o third_party
-# proto/definitions and this module stay the single sources of their files
 rm -rf third_party/ibc/lightclients third_party/e2e
 
 # Generate proto files - output goes to e2e/ (..)

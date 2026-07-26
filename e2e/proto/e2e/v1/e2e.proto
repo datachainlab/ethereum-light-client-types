@@ -5,9 +5,8 @@ import "ibc/lightclients/ethereum/v1/ethereum.proto";
 
 option go_package = "github.com/datachainlab/ethereum-light-client-types/e2e/client/pb";
 
-// Verifier runs the header verification flow of an Ethereum light client
-// (the equivalent of ethereum-elc's check_header_and_update_state
-// verification steps) against prover-generated updates.
+// Verifier verifies a light client update (the equivalent of ethereum-elc's
+// check_header_and_update_state).
 service Verifier {
   rpc VerifyUpdate(VerifyUpdateRequest) returns (VerifyUpdateResponse);
 }

@@ -9,8 +9,7 @@ edition = "2021"
 
 [dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-# tonic/prost versions must line up with ethereum-light-client-proto (prost 0.11)
-# so that the generated request can embed its types via extern_path.
+# tonic/prost must line up with ethereum-light-client-proto (prost 0.11)
 tonic = "0.9"
 prost = "0.11"
 
@@ -22,7 +21,6 @@ ethereum-light-client-verifier = { git = "https://github.com/datachainlab/ethere
 [build-dependencies]
 tonic-build = "0.9"
 
-# `prost` and `ethereum-light-client-proto` (via extern_path) are used by the
-# tonic-generated code, which cargo-machete cannot see.
+# used by the tonic-generated code, which cargo-machete cannot see
 [package.metadata.cargo-machete]
 ignored = ["prost", "ethereum-light-client-proto"]

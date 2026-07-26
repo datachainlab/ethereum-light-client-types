@@ -21,8 +21,8 @@ func getenv(key, fallback string) string {
 	return fallback
 }
 
-// TestVerifyUpdate builds an update from live beacon/execution endpoints and
-// asks the Rust e2e server to run the light client verification flow on it.
+// TestVerifyUpdate builds an update from live endpoints and verifies it via
+// the Rust e2e server.
 func TestVerifyUpdate(t *testing.T) {
 	beaconEndpoint := os.Getenv("BEACON_ENDPOINT")
 	executionEndpoint := os.Getenv("EXECUTION_ENDPOINT")
@@ -39,8 +39,7 @@ func TestVerifyUpdate(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
 
-	// Right after a period boundary the finalized slot equals the boundary
-	// slot; wait for finality to advance into the new period.
+	// wait for finality to advance past the period boundary
 	var req *pb.VerifyUpdateRequest
 	for {
 		var err error
@@ -73,8 +72,7 @@ func TestVerifyUpdate(t *testing.T) {
 	}
 	t.Logf("response: current_committee=%s", hex.EncodeToString(res.CurrentSyncCommittee))
 
-	// The update finalizes a slot in the trusted period, so the sync
-	// committees must be unchanged.
+	// a same-period update must keep the sync committees unchanged
 	if hex.EncodeToString(res.CurrentSyncCommittee) != hex.EncodeToString(req.TrustedCurrentSyncCommittee) {
 		t.Errorf("unexpected current sync committee: %x", res.CurrentSyncCommittee)
 	}

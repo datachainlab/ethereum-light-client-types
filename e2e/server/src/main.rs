@@ -1,10 +1,5 @@
-//! e2e gRPC server.
-//!
-//! Receives prover-generated updates from the Go e2e client and runs the
-//! verification steps of an Ethereum light client update — the equivalent of
-//! ethereum-elc's `check_header_and_update_state` verification flow
-//! (validate_updates / verify_account_storage / timestamp validations /
-//! compute_sync_committees) — using this repository's crates.
+//! e2e gRPC server: verifies a light client update (the equivalent of
+//! ethereum-elc's `check_header_and_update_state`) using this repository's crates.
 
 #![allow(clippy::result_large_err)]
 
@@ -42,9 +37,7 @@ pub mod pb {
 use pb::verifier_server::{Verifier, VerifierServer};
 use pb::{VerifyUpdateRequest, VerifyUpdateResponse};
 
-/// Trusted consensus state view for the verifier: the sync committee period is
-/// derived from the trusted slot, and an update is relevant only if it
-/// finalizes a slot newer than the trusted one.
+/// Trusted sync committee view; the period is derived from the trusted slot.
 #[derive(Default)]
 struct TrustedState {
     slot: U64,
@@ -70,9 +63,7 @@ impl TrustedSyncCommitteeInfo for TrustedState {
     }
 }
 
-/// Minimal ClientState/ConsensusState views for membership verification:
-/// the trusted state is the account storage verified against the finalized
-/// execution state root.
+/// Minimal state views for verify_membership.
 struct E2eClientState {
     latest_height: LcTypesHeight,
     ibc_commitments_slot: H256,
@@ -119,7 +110,6 @@ fn to_h256(field: &str, bz: &[u8]) -> Result<H256, Status> {
 fn verify_update<const SYNC_COMMITTEE_SIZE: usize>(
     r: VerifyUpdateRequest,
 ) -> Result<VerifyUpdateResponse, Status> {
-    // ---- convert the embedded ethereum.v1 messages ----
     let fork_parameters = convert_proto_to_fork_parameters(
         r.fork_parameters
             .ok_or_else(|| Status::invalid_argument("fork_parameters missing"))?,
@@ -154,7 +144,6 @@ fn verify_update<const SYNC_COMMITTEE_SIZE: usize>(
         .try_into()
         .map_err(|e| invalid("ibc_address", e))?;
 
-    // ---- build the verification context (ethereum-elc build_context equivalent) ----
     let ctx = LightClientContext::new(
         fork_parameters,
         r.seconds_per_slot.into(),
@@ -182,7 +171,6 @@ fn verify_update<const SYNC_COMMITTEE_SIZE: usize>(
     )
     .map_err(|e| invalid("trusted_consensus_state", e))?;
 
-    // ---- the check_header_and_update_state verification steps ----
     SyncProtocolVerifier::default()
         .validate_updates(
             &ctx,
