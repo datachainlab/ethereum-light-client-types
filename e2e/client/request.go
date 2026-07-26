@@ -32,6 +32,21 @@ const (
 // after more slots are finalized.
 var ErrFinalityNotAdvanced = errors.New("finalized slot is not newer than the period boundary slot")
 
+// ErrArchiveStateUnavailable is returned when the execution node cannot serve
+// proofs for the requested (older) block.
+var ErrArchiveStateUnavailable = errors.New("archive state unavailable")
+
+func wrapProofErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "archive") || strings.Contains(msg, "missing trie node") {
+		return fmt.Errorf("%w: %v", ErrArchiveStateUnavailable, err)
+	}
+	return err
+}
+
 // proofClient implements relay.ProofClient on top of a raw execution RPC client.
 type proofClient struct {
 	client *rpc.Client
@@ -182,11 +197,16 @@ func fetchForkSchedule(ctx context.Context, beaconEndpoint string) (map[string]u
 // BuildVerifyUpdateRequest builds a request from live endpoints: the trusted
 // state is the sync committee bootstrap at the period boundary, and the update
 // to verify is the latest finality update.
+//
+// With isNext, the trusted state is placed in the previous period and the
+// period's update snapshot is verified with the trusted next sync committee
+// (a sync committee period transition).
 func BuildVerifyUpdateRequest(
 	ctx context.Context,
 	beaconEndpoint, executionEndpoint string,
 	ibcAddress common.Address,
 	ibcClientID string,
+	isNext bool,
 ) (*pb.VerifyUpdateRequest, error) {
 	beaconClient := beacon.NewClient(beaconEndpoint)
 
@@ -203,25 +223,56 @@ func BuildVerifyUpdateRequest(
 	finalizedSlot := uint64(finalityUpdate.Data.FinalizedHeader.Beacon.Slot)
 	period := relay.ComputeSyncCommitteePeriod(network, relay.ComputeEpoch(network, finalizedSlot))
 
-	consensusUpdate := finalityUpdate.Data.ToProto()
-	executionUpdate, headerTimestamp, err := relay.BuildExecutionUpdateFromFinalizedHeader(&finalityUpdate.Data.FinalizedHeader, true)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build execution update: %w", err)
-	}
-
-	// the period's update snapshot provides the trusted next sync committee
+	// the period's update snapshot provides the trusted next sync committee;
+	// with isNext it is also the update to verify (it carries the next sync
+	// committee required for the period transition)
 	lcUpdate, err := beaconClient.GetLightClientUpdate(ctx, period)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get light client update for period %d: %w", period, err)
+	}
+
+	var consensusUpdate *lctypes.ConsensusUpdate
+	var executionUpdate *lctypes.ExecutionUpdate
+	var headerTimestamp uint64
+	if isNext {
+		consensusUpdate = lcUpdate.Data.ToProto()
+		executionUpdate, headerTimestamp, err = relay.BuildExecutionUpdateFromFinalizedHeader(&lcUpdate.Data.FinalizedHeader, false)
+	} else {
+		consensusUpdate = finalityUpdate.Data.ToProto()
+		executionUpdate, headerTimestamp, err = relay.BuildExecutionUpdateFromFinalizedHeader(&finalityUpdate.Data.FinalizedHeader, false)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to build execution update: %w", err)
 	}
 
 	bootstrapCommittee, err := relay.GetBootstrapInPeriod(ctx, beaconClient, network, period)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get bootstrap for period %d: %w", period, err)
 	}
-	trustedSlot := relay.GetPeriodBoundarySlot(network, period)
-	if finalizedSlot <= trustedSlot {
-		return nil, fmt.Errorf("%w: finalized=%d boundary=%d", ErrFinalityNotAdvanced, finalizedSlot, trustedSlot)
+
+	// the trusted state sits in the previous period for a transition update
+	trustedPeriod := period
+	trustedCurrentAggregate := bootstrapCommittee.AggregatePubkey
+	trustedNextAggregate := lcUpdate.Data.NextSyncCommittee.ToProto().AggregatePubkey
+	if isNext {
+		if period == 0 {
+			return nil, errors.New("isNext requires the chain to be past its first sync committee period")
+		}
+		trustedPeriod = period - 1
+		prevCommittee, err := relay.GetBootstrapInPeriod(ctx, beaconClient, network, trustedPeriod)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get bootstrap for period %d: %w", trustedPeriod, err)
+		}
+		trustedCurrentAggregate = prevCommittee.AggregatePubkey
+		trustedNextAggregate = bootstrapCommittee.AggregatePubkey
+	}
+	trustedSlot := relay.GetPeriodBoundarySlot(network, trustedPeriod)
+	updateFinalizedSlot := uint64(lcUpdate.Data.FinalizedHeader.Beacon.Slot)
+	if !isNext {
+		updateFinalizedSlot = finalizedSlot
+	}
+	if updateFinalizedSlot <= trustedSlot {
+		return nil, fmt.Errorf("%w: finalized=%d boundary=%d", ErrFinalityNotAdvanced, updateFinalizedSlot, trustedSlot)
 	}
 	trustedTimestamp := genesis.GenesisTimeSeconds + trustedSlot*relay.SecondsPerSlot(network)
 
@@ -232,7 +283,7 @@ func BuildVerifyUpdateRequest(
 	defer executionClient.Close()
 	accountUpdate, err := relay.BuildAccountUpdate(ctx, proofClient{executionClient}, ibcAddress, executionUpdate.BlockNumber)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build account update: %w", err)
+		return nil, wrapProofErr(fmt.Errorf("failed to build account update: %w", err))
 	}
 
 	// optionally prove membership of the client state commitment
@@ -246,7 +297,7 @@ func BuildVerifyUpdateRequest(
 		}
 		membershipProof, err = relay.BuildStateProof(ctx, proofClient{executionClient}, ibcAddress, []byte(membershipPath), int64(executionUpdate.BlockNumber))
 		if err != nil {
-			return nil, fmt.Errorf("failed to build state proof: %w", err)
+			return nil, wrapProofErr(fmt.Errorf("failed to build state proof: %w", err))
 		}
 	}
 
@@ -284,10 +335,10 @@ func BuildVerifyUpdateRequest(
 		TrustedSyncCommittee: &lctypes.TrustedSyncCommittee{
 			TrustedHeight: &clienttypes.Height{RevisionNumber: 0, RevisionHeight: trustedSlot},
 			SyncCommittee: bootstrapCommittee,
-			IsNext:        false,
+			IsNext:        isNext,
 		},
-		TrustedCurrentSyncCommittee: bootstrapCommittee.AggregatePubkey,
-		TrustedNextSyncCommittee:    lcUpdate.Data.NextSyncCommittee.ToProto().AggregatePubkey,
+		TrustedCurrentSyncCommittee: trustedCurrentAggregate,
+		TrustedNextSyncCommittee:    trustedNextAggregate,
 		TrustedTimestampSecs:        trustedTimestamp,
 
 		ConsensusUpdate:     consensusUpdate,

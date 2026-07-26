@@ -24,6 +24,17 @@ func getenv(key, fallback string) string {
 // TestVerifyUpdate builds an update from live endpoints and verifies it via
 // the Rust e2e server.
 func TestVerifyUpdate(t *testing.T) {
+	runVerifyUpdate(t, false)
+}
+
+// TestVerifyUpdateNextSyncCommittee verifies a sync committee period
+// transition: the trusted state sits in the previous period and the update is
+// verified with its next sync committee (is_next = true).
+func TestVerifyUpdateNextSyncCommittee(t *testing.T) {
+	runVerifyUpdate(t, true)
+}
+
+func runVerifyUpdate(t *testing.T, isNext bool) {
 	beaconEndpoint := os.Getenv("BEACON_ENDPOINT")
 	executionEndpoint := os.Getenv("EXECUTION_ENDPOINT")
 	if beaconEndpoint == "" || executionEndpoint == "" {
@@ -43,9 +54,12 @@ func TestVerifyUpdate(t *testing.T) {
 	var req *pb.VerifyUpdateRequest
 	for {
 		var err error
-		req, err = BuildVerifyUpdateRequest(ctx, beaconEndpoint, executionEndpoint, ibcAddress, ibcClientID)
+		req, err = BuildVerifyUpdateRequest(ctx, beaconEndpoint, executionEndpoint, ibcAddress, ibcClientID, isNext)
 		if err == nil {
 			break
+		}
+		if errors.Is(err, ErrArchiveStateUnavailable) {
+			t.Skipf("skipping: %v", err)
 		}
 		if !errors.Is(err, ErrFinalityNotAdvanced) {
 			t.Fatalf("failed to build request: %v", err)
@@ -72,11 +86,22 @@ func TestVerifyUpdate(t *testing.T) {
 	}
 	t.Logf("response: current_committee=%s", hex.EncodeToString(res.CurrentSyncCommittee))
 
-	// a same-period update must keep the sync committees unchanged
-	if hex.EncodeToString(res.CurrentSyncCommittee) != hex.EncodeToString(req.TrustedCurrentSyncCommittee) {
-		t.Errorf("unexpected current sync committee: %x", res.CurrentSyncCommittee)
-	}
-	if hex.EncodeToString(res.NextSyncCommittee) != hex.EncodeToString(req.TrustedNextSyncCommittee) {
-		t.Errorf("unexpected next sync committee: %x", res.NextSyncCommittee)
+	if isNext {
+		// a transition update rotates the committees: the trusted next becomes
+		// current, and the update's next committee becomes next
+		if hex.EncodeToString(res.CurrentSyncCommittee) != hex.EncodeToString(req.TrustedNextSyncCommittee) {
+			t.Errorf("unexpected current sync committee: %x", res.CurrentSyncCommittee)
+		}
+		if hex.EncodeToString(res.NextSyncCommittee) != hex.EncodeToString(req.ConsensusUpdate.NextSyncCommittee.AggregatePubkey) {
+			t.Errorf("unexpected next sync committee: %x", res.NextSyncCommittee)
+		}
+	} else {
+		// a same-period update must keep the sync committees unchanged
+		if hex.EncodeToString(res.CurrentSyncCommittee) != hex.EncodeToString(req.TrustedCurrentSyncCommittee) {
+			t.Errorf("unexpected current sync committee: %x", res.CurrentSyncCommittee)
+		}
+		if hex.EncodeToString(res.NextSyncCommittee) != hex.EncodeToString(req.TrustedNextSyncCommittee) {
+			t.Errorf("unexpected next sync committee: %x", res.NextSyncCommittee)
+		}
 	}
 }
