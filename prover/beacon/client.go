@@ -128,9 +128,12 @@ func (cl Client) GetLightClientUpdates(ctx context.Context, period uint64, count
 	if err := cl.fetcher.Get(ctx, fmt.Sprintf("/eth/v1/beacon/light_client/updates?start_period=%v&count=%v", period, count), &res); err != nil {
 		return nil, err
 	}
-	if len(res) != int(count) {
+	if len(res) < int(count) {
 		return nil, fmt.Errorf("unexpected response length: expected=%v actual=%v", count, len(res))
 	}
+	// Some public nodes ignore the `count` parameter and return more updates
+	// than requested; keep only the requested prefix.
+	res = res[:count]
 	for i := range res {
 		if !IsSupportedVersion(res[i].Version) {
 			return nil, fmt.Errorf("unsupported version: %v", res[i].Version)
