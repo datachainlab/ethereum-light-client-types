@@ -4,6 +4,7 @@ go 1.22.0
 
 require (
 	github.com/cosmos/gogoproto v1.4.11
+	github.com/cosmos/ibc-go/v8 v8.2.1
 	github.com/datachainlab/ethereum-light-client-types v0.2.2
 	github.com/ethereum/go-ethereum v1.14.12
 	google.golang.org/grpc v1.71.0
@@ -51,7 +52,6 @@ require (
 	github.com/cosmos/gogogateway v1.2.0 // indirect
 	github.com/cosmos/iavl v1.0.1 // indirect
 	github.com/cosmos/ibc-go/modules/capability v1.0.0 // indirect
-	github.com/cosmos/ibc-go/v8 v8.2.1 // indirect
 	github.com/cosmos/ics23/go v0.10.0 // indirect
 	github.com/cosmos/ledger-cosmos-go v0.13.3 // indirect
 	github.com/crate-crypto/go-ipa v0.0.0-20240223125850-b1e8a79f509c // indirect

@@ -22,6 +22,7 @@ ethereum-light-client-verifier = { git = "https://github.com/datachainlab/ethere
 [build-dependencies]
 tonic-build = "0.9"
 
-# `prost` is used by the tonic-generated code, which cargo-machete cannot see.
+# `prost` and `ethereum-light-client-proto` (via extern_path) are used by the
+# tonic-generated code, which cargo-machete cannot see.
 [package.metadata.cargo-machete]
-ignored = ["prost"]
+ignored = ["prost", "ethereum-light-client-proto"]

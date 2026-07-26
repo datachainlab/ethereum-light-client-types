@@ -12,7 +12,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .compile(
             &["../proto/e2e/v1/e2e.proto"],
-            &["../proto", "../../proto/definitions", "../proto/third_party"],
+            &[
+                "../proto",
+                "../../proto/definitions",
+                "../proto/third_party",
+            ],
         )?;
     Ok(())
 }

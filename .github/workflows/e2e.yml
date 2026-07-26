@@ -14,6 +14,9 @@ jobs:
     env:
       BEACON_ENDPOINT: https://ethereum-beacon-api.publicnode.com
       EXECUTION_ENDPOINT: https://ethereum-rpc.publicnode.com
+      # TOKI's IBC handler (OwnableUpgradeableIBCHandler proxy) on mainnet
+      IBC_ADDRESS: "0x0f4BDbE6735BFa859A73F8Da9251662E1081ca9C"
+      IBC_CLIENT_ID: "lcp-client-0"
     steps:
       - uses: actions/checkout@v4
       - uses: actions-rust-lang/setup-rust-toolchain@v1

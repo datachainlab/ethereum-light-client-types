@@ -2,17 +2,20 @@ package client
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
-	"os"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
+	clienttypes "github.com/cosmos/ibc-go/v8/modules/core/02-client/types"
 	"github.com/datachainlab/ethereum-light-client-types/e2e/client/pb"
 	"github.com/datachainlab/ethereum-light-client-types/prover/beacon"
 	"github.com/datachainlab/ethereum-light-client-types/prover/relay"
+	lctypes "github.com/datachainlab/ethereum-light-client-types/prover/types"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/rlp"
@@ -69,6 +72,33 @@ func (p proofClient) GetProof(ctx context.Context, address common.Address, stora
 	return proof, nil
 }
 
+// getClientState calls the IBC handler's getClientState(string) at the given
+// block and returns the client state bytes committed at
+// "clients/<clientID>/clientState".
+func getClientState(ctx context.Context, client *rpc.Client, ibcAddress common.Address, clientID string, blockNumber uint64) ([]byte, error) {
+	// abi-encode getClientState(string)
+	id := []byte(clientID)
+	idHex := fmt.Sprintf("%x", id)
+	data := fmt.Sprintf("0x76c81c42%064x%064x%s%s", 0x20, len(id), idHex, strings.Repeat("0", (64-len(idHex)%64)%64))
+	var out hexutil.Bytes
+	if err := client.CallContext(ctx, &out, "eth_call", map[string]any{
+		"to":   ibcAddress,
+		"data": data,
+	}, hexutil.EncodeUint64(blockNumber)); err != nil {
+		return nil, fmt.Errorf("getClientState(%s) failed: %w", clientID, err)
+	}
+	// returns (bytes clientState, bool found)
+	if len(out) < 96 {
+		return nil, fmt.Errorf("unexpected getClientState result length: %d", len(out))
+	}
+	if new(big.Int).SetBytes(out[32:64]).Sign() == 0 {
+		return nil, fmt.Errorf("client %s not found on %s", clientID, ibcAddress)
+	}
+	offset := new(big.Int).SetBytes(out[:32]).Uint64()
+	length := new(big.Int).SetBytes(out[offset : offset+32]).Uint64()
+	return out[offset+32 : offset+32+length], nil
+}
+
 // encodeRLPProof converts hex-encoded proof nodes into a single RLP-encoded
 // list of nodes, the format expected by the light client verifier.
 func encodeRLPProof(proof []string) ([]byte, error) {
@@ -101,31 +131,56 @@ func detectNetwork(genesisForkVersion [4]byte) string {
 	}
 }
 
-// forkScheduleFromEnv parses FORK_SCHEDULE ("altair=0,bellatrix=0,...").
-// All forks default to epoch 0, which matches a typical local devnet.
-func forkScheduleFromEnv() (map[string]uint64, error) {
-	schedule := map[string]uint64{
-		relay.Altair:    0,
-		relay.Bellatrix: 0,
-		relay.Capella:   0,
-		relay.Deneb:     0,
-		relay.Electra:   0,
-		relay.Fulu:      0,
+// fetchForkSchedule fetches the fork epochs from the beacon node's config
+// spec. A fork the node does not schedule is treated as never activating.
+func fetchForkSchedule(ctx context.Context, beaconEndpoint string) (map[string]uint64, error) {
+	const farFutureEpoch = ^uint64(0)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, beaconEndpoint+"/eth/v1/config/spec", nil)
+	if err != nil {
+		return nil, err
 	}
-	env := os.Getenv("FORK_SCHEDULE")
-	if env == "" {
-		return schedule, nil
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get config spec: %w", err)
 	}
-	for _, kv := range strings.Split(env, ",") {
-		parts := strings.SplitN(kv, "=", 2)
-		if len(parts) != 2 {
-			return nil, fmt.Errorf("invalid FORK_SCHEDULE entry: %q", kv)
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("config spec returned status code %d", res.StatusCode)
+	}
+	var spec struct {
+		Data map[string]json.RawMessage `json:"data"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&spec); err != nil {
+		return nil, fmt.Errorf("failed to decode config spec: %w", err)
+	}
+
+	epoch := func(key string) (uint64, error) {
+		raw, ok := spec.Data[key+"_FORK_EPOCH"]
+		if !ok {
+			return farFutureEpoch, nil
 		}
-		epoch, err := strconv.ParseUint(parts[1], 10, 64)
+		var v string
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return 0, fmt.Errorf("invalid %s_FORK_EPOCH: %w", key, err)
+		}
+		return strconv.ParseUint(v, 10, 64)
+	}
+
+	schedule := map[string]uint64{}
+	for fork, key := range map[string]string{
+		relay.Altair:    "ALTAIR",
+		relay.Bellatrix: "BELLATRIX",
+		relay.Capella:   "CAPELLA",
+		relay.Deneb:     "DENEB",
+		relay.Electra:   "ELECTRA",
+		relay.Fulu:      "FULU",
+	} {
+		e, err := epoch(key)
 		if err != nil {
-			return nil, fmt.Errorf("invalid FORK_SCHEDULE epoch in %q: %w", kv, err)
+			return nil, err
 		}
-		schedule[parts[0]] = epoch
+		schedule[fork] = e
 	}
 	return schedule, nil
 }
@@ -139,6 +194,7 @@ func BuildVerifyUpdateRequest(
 	ctx context.Context,
 	beaconEndpoint, executionEndpoint string,
 	ibcAddress common.Address,
+	ibcClientID string,
 ) (*pb.VerifyUpdateRequest, error) {
 	beaconClient := beacon.NewClient(beaconEndpoint)
 
@@ -192,9 +248,28 @@ func BuildVerifyUpdateRequest(
 		return nil, fmt.Errorf("failed to build account update: %w", err)
 	}
 
-	schedule, err := forkScheduleFromEnv()
-	if err != nil {
-		return nil, err
+	// Optionally prove membership of the client state commitment at the same block.
+	var membershipPath string
+	var membershipValue, membershipProof []byte
+	if ibcClientID != "" {
+		membershipPath = fmt.Sprintf("clients/%s/clientState", ibcClientID)
+		membershipValue, err = getClientState(ctx, executionClient, ibcAddress, ibcClientID, executionUpdate.BlockNumber)
+		if err != nil {
+			return nil, err
+		}
+		membershipProof, err = relay.BuildStateProof(ctx, proofClient{executionClient}, ibcAddress, []byte(membershipPath), int64(executionUpdate.BlockNumber))
+		if err != nil {
+			return nil, fmt.Errorf("failed to build state proof: %w", err)
+		}
+	}
+
+	// The fork schedule is only consulted for the minimal preset.
+	var schedule map[string]uint64
+	if network == relay.Minimal {
+		schedule, err = fetchForkSchedule(ctx, beaconEndpoint)
+		if err != nil {
+			return nil, err
+		}
 	}
 	forkParameters := relay.GetForkParameters(network, schedule)
 
@@ -218,18 +293,26 @@ func BuildVerifyUpdateRequest(
 		MaxClockDriftSecs:            defaultMaxClockDriftSecs,
 		IbcAddress:                   ibcAddress.Bytes(),
 
-		TrustedSlot:                 trustedSlot,
+		// trusted_height.revision_height carries the trusted beacon slot
+		TrustedSyncCommittee: &lctypes.TrustedSyncCommittee{
+			TrustedHeight: &clienttypes.Height{RevisionNumber: 0, RevisionHeight: trustedSlot},
+			SyncCommittee: bootstrapCommittee,
+			IsNext:        false,
+		},
 		TrustedCurrentSyncCommittee: bootstrapCommittee.AggregatePubkey,
 		TrustedNextSyncCommittee:    lcUpdate.Data.NextSyncCommittee.ToProto().AggregatePubkey,
 		TrustedTimestampSecs:        trustedTimestamp,
 
-		SyncCommittee:       bootstrapCommittee,
-		IsNext:              false,
 		ConsensusUpdate:     consensusUpdate,
 		ExecutionUpdate:     executionUpdate,
 		AccountUpdate:       accountUpdate,
 		HeaderTimestampSecs: headerTimestamp,
 
 		NowSecs: uint64(time.Now().Unix()),
+
+		IbcCommitmentsSlot: relay.IBCCommitmentsSlot(),
+		MembershipPath:     membershipPath,
+		MembershipValue:    membershipValue,
+		MembershipProof:    membershipProof,
 	}, nil
 }

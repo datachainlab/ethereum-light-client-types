@@ -29,27 +29,30 @@ message VerifyUpdateRequest {
   bytes ibc_address = 13; // 20 bytes
 
   // ------ trusted consensus state ------
-  uint64 trusted_slot = 14;
+  // trusted_height.revision_height carries the trusted beacon slot
+  ibc.lightclients.ethereum.v1.TrustedSyncCommittee trusted_sync_committee = 14;
   bytes trusted_current_sync_committee = 15; // aggregate pubkey
   bytes trusted_next_sync_committee = 16;    // aggregate pubkey
   uint64 trusted_timestamp_secs = 17;
 
   // ------ header ------
-  ibc.lightclients.ethereum.v1.SyncCommittee sync_committee = 18; // trusted committee keys
-  bool is_next = 19;
-  ibc.lightclients.ethereum.v1.ConsensusUpdate consensus_update = 20;
-  ibc.lightclients.ethereum.v1.ExecutionUpdate execution_update = 21;
-  ibc.lightclients.ethereum.v1.AccountUpdate account_update = 22;
-  uint64 header_timestamp_secs = 23;
+  ibc.lightclients.ethereum.v1.ConsensusUpdate consensus_update = 18;
+  ibc.lightclients.ethereum.v1.ExecutionUpdate execution_update = 19;
+  ibc.lightclients.ethereum.v1.AccountUpdate account_update = 20;
+  uint64 header_timestamp_secs = 21;
 
   // ------ host ------
-  uint64 now_secs = 24;
+  uint64 now_secs = 22;
+
+  // ------ membership verification (optional; skipped when path is empty) ------
+  bytes ibc_commitments_slot = 23; // 32 bytes
+  string membership_path = 24;     // IBC commitment path, e.g. "clients/<id>/clientState"
+  bytes membership_value = 25;     // value committed at the path
+  bytes membership_proof = 26;     // EIP-1184 storage proof
 }
 
 message VerifyUpdateResponse {
-  uint64 finalized_slot = 1;
-  uint64 latest_execution_block_number = 2;
   // aggregate pubkeys of the sync committees after applying the update
-  bytes current_sync_committee = 3;
-  bytes next_sync_committee = 4;
+  bytes current_sync_committee = 1;
+  bytes next_sync_committee = 2;
 }

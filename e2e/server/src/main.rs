@@ -13,13 +13,16 @@ use ethereum_consensus::compute::compute_sync_committee_period_at_slot;
 use ethereum_consensus::context::ChainContext;
 use ethereum_consensus::sync_protocol::SyncCommitteePeriod;
 use ethereum_consensus::types::{Address, H256, U64};
-use ethereum_light_client_proto::ibc::core::client::v1::Height as ProtoHeight;
-use ethereum_light_client_proto::ibc::lightclients::ethereum::v1::TrustedSyncCommittee as ProtoTrustedSyncCommittee;
+
+use ethereum_light_client_types::client_state::ClientState;
 use ethereum_light_client_types::commitment::verify_account_storage;
 use ethereum_light_client_types::consensus::{
     convert_proto_to_consensus_update, convert_proto_to_execution_update,
     convert_proto_to_fork_parameters, AccountUpdateInfo, TrustedSyncCommittee,
 };
+use ethereum_light_client_types::consensus_state::ConsensusState;
+use ethereum_light_client_types::height::Height as LcTypesHeight;
+use ethereum_light_client_types::membership::verify_membership;
 use ethereum_light_client_types::time::{
     secs_to_nanos, validate_header_timestamp_not_future,
     validate_state_timestamp_within_trusting_period,
@@ -67,6 +70,38 @@ impl TrustedSyncCommitteeInfo for TrustedState {
     }
 }
 
+/// Minimal ClientState/ConsensusState views for membership verification:
+/// the trusted state is the account storage verified against the finalized
+/// execution state root.
+struct E2eClientState {
+    latest_height: LcTypesHeight,
+    ibc_commitments_slot: H256,
+}
+
+impl ClientState for E2eClientState {
+    fn latest_height(&self) -> LcTypesHeight {
+        self.latest_height
+    }
+
+    fn ibc_commitments_slot(&self) -> H256 {
+        self.ibc_commitments_slot
+    }
+
+    fn canonicalize(self) -> Self {
+        self
+    }
+}
+
+struct E2eConsensusState {
+    storage_root: H256,
+}
+
+impl ConsensusState for E2eConsensusState {
+    fn storage_root(&self) -> H256 {
+        self.storage_root
+    }
+}
+
 fn invalid(field: &str, e: impl std::fmt::Debug) -> Status {
     Status::invalid_argument(format!("{field}: {e:?}"))
 }
@@ -105,19 +140,13 @@ fn verify_update<const SYNC_COMMITTEE_SIZE: usize>(
             .ok_or_else(|| Status::invalid_argument("account_update missing"))?,
     )
     .map_err(|e| invalid("account_update", e))?;
-    // Reuse the TrustedSyncCommittee proto conversion to build the typed
-    // sync committee for TrustedConsensusState.
-    let trusted_sync_committee: TrustedSyncCommittee<SYNC_COMMITTEE_SIZE> =
-        ProtoTrustedSyncCommittee {
-            trusted_height: Some(ProtoHeight {
-                revision_number: 0,
-                revision_height: r.trusted_slot,
-            }),
-            sync_committee: r.sync_committee,
-            is_next: r.is_next,
-        }
+    // trusted_height.revision_height carries the trusted beacon slot
+    let trusted_sync_committee: TrustedSyncCommittee<SYNC_COMMITTEE_SIZE> = r
+        .trusted_sync_committee
+        .ok_or_else(|| Status::invalid_argument("trusted_sync_committee missing"))?
         .try_into()
-        .map_err(|e| invalid("sync_committee", e))?;
+        .map_err(|e| invalid("trusted_sync_committee", e))?;
+    let trusted_slot = trusted_sync_committee.height.revision_height();
 
     let ibc_address: Address = r
         .ibc_address
@@ -140,7 +169,7 @@ fn verify_update<const SYNC_COMMITTEE_SIZE: usize>(
     );
 
     let trusted_state = TrustedState {
-        slot: r.trusted_slot.into(),
+        slot: trusted_slot.into(),
         current_sync_committee: PublicKey::try_from(r.trusted_current_sync_committee.clone())
             .map_err(|e| invalid("trusted_current_sync_committee", e))?,
         next_sync_committee: PublicKey::try_from(r.trusted_next_sync_committee.clone())
@@ -171,6 +200,25 @@ fn verify_update<const SYNC_COMMITTEE_SIZE: usize>(
     )
     .map_err(|e| Status::failed_precondition(format!("verify_account_storage: {e:?}")))?;
 
+    if !r.membership_path.is_empty() {
+        let height = LcTypesHeight::new(0, execution_update.block_number.into());
+        verify_membership(
+            &E2eClientState {
+                latest_height: height,
+                ibc_commitments_slot: to_h256("ibc_commitments_slot", &r.ibc_commitments_slot)?,
+            },
+            &E2eConsensusState {
+                storage_root: account_update.account_storage_root,
+            },
+            r.membership_path,
+            r.membership_value,
+            height,
+            r.membership_proof,
+            &ExecutionVerifier,
+        )
+        .map_err(|e| Status::failed_precondition(format!("verify_membership: {e:?}")))?;
+    }
+
     validate_state_timestamp_within_trusting_period(
         secs_to_nanos(r.now_secs),
         Duration::from_secs(r.trusting_period_secs),
@@ -184,10 +232,8 @@ fn verify_update<const SYNC_COMMITTEE_SIZE: usize>(
     )
     .map_err(|e| Status::failed_precondition(format!("clock_drift: {e:?}")))?;
 
-    let finalized_slot = consensus_update.finalized_header.0.slot;
-    let block_number = execution_update.block_number;
     let trusted_state = TrustedState {
-        slot: r.trusted_slot.into(),
+        slot: trusted_slot.into(),
         current_sync_committee: PublicKey::try_from(r.trusted_current_sync_committee)
             .map_err(|e| invalid("trusted_current_sync_committee", e))?,
         next_sync_committee: PublicKey::try_from(r.trusted_next_sync_committee)
@@ -197,8 +243,6 @@ fn verify_update<const SYNC_COMMITTEE_SIZE: usize>(
         .map_err(|e| Status::failed_precondition(format!("compute_sync_committees: {e:?}")))?;
 
     Ok(VerifyUpdateResponse {
-        finalized_slot: finalized_slot.into(),
-        latest_execution_block_number: block_number.into(),
         current_sync_committee: new_sync_committee.current_sync_committee.to_vec(),
         next_sync_committee: new_sync_committee.next_sync_committee.to_vec(),
     })
@@ -215,8 +259,8 @@ impl Verifier for VerifierService {
     ) -> Result<Response<VerifyUpdateResponse>, Status> {
         let r = request.into_inner();
         println!(
-            "verify_update: sync_committee_size={} trusted_slot={}",
-            r.sync_committee_size, r.trusted_slot
+            "verify_update: sync_committee_size={}",
+            r.sync_committee_size
         );
         let resp = match r.sync_committee_size {
             32 => verify_update::<32>(r),
@@ -226,10 +270,7 @@ impl Verifier for VerifierService {
             ))),
         };
         match &resp {
-            Ok(r) => println!(
-                "verify_update: OK finalized_slot={} block_number={}",
-                r.finalized_slot, r.latest_execution_block_number
-            ),
+            Ok(_) => println!("verify_update: OK"),
             Err(e) => println!("verify_update: ERROR {e}"),
         }
         resp.map(Response::new)

@@ -7,8 +7,8 @@
 # Environment variables for `make test`:
 #   BEACON_ENDPOINT     (required) beacon API endpoint, e.g. http://localhost:60043
 #   EXECUTION_ENDPOINT  (required) execution RPC endpoint, e.g. http://localhost:60038
-#   FORK_SCHEDULE       (optional) fork epochs for minimal preset, e.g. "deneb=0,electra=0"
 #   IBC_ADDRESS         (optional) account whose storage root is verified (default: zero address)
+#   IBC_CLIENT_ID       (optional) verify membership of "clients/<id>/clientState" on IBC_ADDRESS
 #   E2E_SERVER_ADDR     (optional) verifier server address (default: localhost:50151)
 
 .PHONY: server test proto-gen

@@ -31,6 +31,7 @@ func TestVerifyUpdate(t *testing.T) {
 	}
 	serverAddr := getenv("E2E_SERVER_ADDR", "localhost:50151")
 	ibcAddress := common.HexToAddress(os.Getenv("IBC_ADDRESS")) // zero address if unset
+	ibcClientID := os.Getenv("IBC_CLIENT_ID")                   // membership verification if set
 
 	// Right after a sync committee period boundary the retry loop below can
 	// wait for finality to advance into the new period (up to ~13 minutes on
@@ -43,7 +44,7 @@ func TestVerifyUpdate(t *testing.T) {
 	var req *pb.VerifyUpdateRequest
 	for {
 		var err error
-		req, err = BuildVerifyUpdateRequest(ctx, beaconEndpoint, executionEndpoint, ibcAddress)
+		req, err = BuildVerifyUpdateRequest(ctx, beaconEndpoint, executionEndpoint, ibcAddress, ibcClientID)
 		if err == nil {
 			break
 		}
@@ -57,8 +58,8 @@ func TestVerifyUpdate(t *testing.T) {
 		case <-time.After(30 * time.Second):
 		}
 	}
-	t.Logf("request: trusted_slot=%d header_timestamp=%d sync_committee_size=%d",
-		req.TrustedSlot, req.HeaderTimestampSecs, req.SyncCommitteeSize)
+	t.Logf("request: trusted_slot=%d header_timestamp=%d sync_committee_size=%d membership_path=%q",
+		req.TrustedSyncCommittee.TrustedHeight.RevisionHeight, req.HeaderTimestampSecs, req.SyncCommitteeSize, req.MembershipPath)
 
 	conn, err := grpc.NewClient(serverAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -70,15 +71,8 @@ func TestVerifyUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("VerifyUpdate failed: %v", err)
 	}
-	t.Logf("response: finalized_slot=%d block_number=%d current_committee=%s",
-		res.FinalizedSlot, res.LatestExecutionBlockNumber, hex.EncodeToString(res.CurrentSyncCommittee))
+	t.Logf("response: current_committee=%s", hex.EncodeToString(res.CurrentSyncCommittee))
 
-	if res.FinalizedSlot <= req.TrustedSlot {
-		t.Errorf("finalized slot %d must be newer than trusted slot %d", res.FinalizedSlot, req.TrustedSlot)
-	}
-	if res.LatestExecutionBlockNumber == 0 {
-		t.Error("latest execution block number must not be zero")
-	}
 	// The update finalizes a slot in the trusted period, so the sync
 	// committees must be unchanged.
 	if hex.EncodeToString(res.CurrentSyncCommittee) != hex.EncodeToString(req.TrustedCurrentSyncCommittee) {
