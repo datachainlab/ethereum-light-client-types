@@ -88,6 +88,9 @@ func (p proofClient) GetProof(ctx context.Context, address common.Address, stora
 // getClientState returns the client state bytes committed at
 // "clients/<clientID>/clientState" via the IBC handler's getClientState(string).
 func getClientState(ctx context.Context, client *rpc.Client, ibcAddress common.Address, clientID string, blockNumber uint64) ([]byte, error) {
+	// abi-encoded call: 0x76c81c42 = keccak256("getClientState(string)")[:4],
+	// then per the ABI spec for a single dynamic argument: the offset to the
+	// string data (32), its length, and the bytes right-padded to a 32-byte word
 	id := []byte(clientID)
 	idHex := fmt.Sprintf("%x", id)
 	data := fmt.Sprintf("0x76c81c42%064x%064x%s%s", 0x20, len(id), idHex, strings.Repeat("0", (64-len(idHex)%64)%64))
@@ -98,6 +101,7 @@ func getClientState(ctx context.Context, client *rpc.Client, ibcAddress common.A
 	}, hexutil.EncodeUint64(blockNumber)); err != nil {
 		return nil, fmt.Errorf("getClientState(%s) failed: %w", clientID, err)
 	}
+	// decode the (bytes clientState, bool found) return value
 	if len(out) < 96 {
 		return nil, fmt.Errorf("unexpected getClientState result length: %d", len(out))
 	}
