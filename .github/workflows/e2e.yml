@@ -1,0 +1,44 @@
+name: e2e
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      BEACON_ENDPOINT: https://ethereum-beacon-api.publicnode.com
+      EXECUTION_ENDPOINT: https://ethereum-rpc.publicnode.com
+      # TOKI's IBC handler (OwnableUpgradeableIBCHandler proxy) on mainnet
+      IBC_ADDRESS: "0x0f4BDbE6735BFa859A73F8Da9251662E1081ca9C"
+      IBC_CLIENT_ID: "lcp-client-0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: e2e/server
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: e2e/client/go.sum
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Generate protos
+        run: make -C e2e proto-gen
+      - name: Build the verifier server
+        run: cargo build --release --manifest-path=e2e/server/Cargo.toml
+      - name: Start the verifier server
+        run: |
+          e2e/server/target/release/e2e-server > /tmp/e2e-server.log 2>&1 &
+          timeout 30 bash -c 'until nc -z localhost 50151; do sleep 1; done'
+      - name: Run e2e test
+        run: make -C e2e test
+      - name: Show server log
+        if: always()
+        run: cat /tmp/e2e-server.log

@@ -1,0 +1,26 @@
+[package]
+name = "e2e-server"
+version = "0.1.0"
+edition = "2021"
+
+# Standalone: keep this crate out of the repository's root workspace so that
+# the root Cargo.toml / Cargo.lock stay untouched.
+[workspace]
+
+[dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+# tonic/prost must line up with ethereum-light-client-proto (prost 0.11)
+tonic = "0.9"
+prost = "0.11"
+
+ethereum-light-client-types = { path = "../../type" }
+ethereum-light-client-proto = { path = "../../proto" }
+ethereum-consensus = { git = "https://github.com/datachainlab/ethereum-light-client-rs", rev = "v0.2.0" }
+ethereum-light-client-verifier = { git = "https://github.com/datachainlab/ethereum-light-client-rs", rev = "v0.2.0" }
+
+[build-dependencies]
+tonic-build = "0.9"
+
+# used by the tonic-generated code, which cargo-machete cannot see
+[package.metadata.cargo-machete]
+ignored = ["prost", "ethereum-light-client-proto"]

@@ -1,0 +1,57 @@
+syntax = "proto3";
+package e2e.v1;
+
+import "ibc/lightclients/ethereum/v1/ethereum.proto";
+
+option go_package = "github.com/datachainlab/ethereum-light-client-types/e2e/client/pb";
+
+// Verifier verifies a light client update (the equivalent of ethereum-elc's
+// check_header_and_update_state).
+service Verifier {
+  rpc VerifyUpdate(VerifyUpdateRequest) returns (VerifyUpdateResponse);
+}
+
+message VerifyUpdateRequest {
+  // ------ chain / client config ------
+  uint32 sync_committee_size = 1; // 32 (minimal) or 512 (mainnet)
+  bytes genesis_validators_root = 2;
+  uint64 min_sync_committee_participants = 3;
+  uint64 genesis_time = 4;
+  ibc.lightclients.ethereum.v1.ForkParameters fork_parameters = 5;
+  uint64 seconds_per_slot = 6;
+  uint64 slots_per_epoch = 7;
+  uint64 epochs_per_sync_committee_period = 8;
+  uint64 trust_level_numerator = 9;
+  uint64 trust_level_denominator = 10;
+  uint64 trusting_period_secs = 11;
+  uint64 max_clock_drift_secs = 12;
+  bytes ibc_address = 13; // 20 bytes
+
+  // ------ trusted consensus state ------
+  // trusted_height.revision_height carries the trusted beacon slot
+  ibc.lightclients.ethereum.v1.TrustedSyncCommittee trusted_sync_committee = 14;
+  bytes trusted_current_sync_committee = 15; // aggregate pubkey
+  bytes trusted_next_sync_committee = 16;    // aggregate pubkey
+  uint64 trusted_timestamp_secs = 17;
+
+  // ------ header ------
+  ibc.lightclients.ethereum.v1.ConsensusUpdate consensus_update = 18;
+  ibc.lightclients.ethereum.v1.ExecutionUpdate execution_update = 19;
+  ibc.lightclients.ethereum.v1.AccountUpdate account_update = 20;
+  uint64 header_timestamp_secs = 21;
+
+  // ------ host ------
+  uint64 now_secs = 22;
+
+  // ------ membership verification (optional; skipped when path is empty) ------
+  bytes ibc_commitments_slot = 23; // 32 bytes
+  string membership_path = 24;     // IBC commitment path, e.g. "clients/<id>/clientState"
+  bytes membership_value = 25;     // value committed at the path
+  bytes membership_proof = 26;     // EIP-1184 storage proof
+}
+
+message VerifyUpdateResponse {
+  // aggregate pubkeys of the sync committees after applying the update
+  bytes current_sync_committee = 1;
+  bytes next_sync_committee = 2;
+}
