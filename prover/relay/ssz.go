@@ -15,6 +15,9 @@ func GenerateMerkleProof(leaves [][]byte, leafIndex uint64) ([][]byte, error) {
 	if leafLen == 0 {
 		return nil, fmt.Errorf("leaves length must be greater than 0")
 	}
+	if leafIndex >= uint64(leafLen) {
+		return nil, fmt.Errorf("leafIndex out of range: leafIndex=%d leafLen=%d", leafIndex, leafLen)
+	}
 	// leaves length must be power of 2
 	var nearestPowerOf2 int = 1
 	for nearestPowerOf2 < leafLen {
@@ -28,7 +31,7 @@ func GenerateMerkleProof(leaves [][]byte, leafIndex uint64) ([][]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	// NOTE: seems that fastssz sets root as index=1, so the index is off by one from the ethereum consensus-spes
+	// NOTE: seems that fastssz sets root as index=1, so the index is off by one from the ethereum consensus-specs
 	// https://github.com/ethereum/consensus-specs/blob/c46c3945fd7fbd1226ece1f8d684c4b724b7bdab/ssz/merkle-proofs.md#generalized-merkle-tree-index
 	proof, err := node.Prove(nearestPowerOf2 + int(leafIndex))
 	if err != nil {

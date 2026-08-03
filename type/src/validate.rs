@@ -14,24 +14,13 @@ use ethereum_light_client_verifier::updates::ConsensusUpdate;
 /// Difference between block_number gindex and block_hash gindex in ExecutionPayload.
 const BLOCK_NUMBER_TO_BLOCK_HASH_DIFF: u32 = 6;
 
-/// Validates the execution update block hash for pre-Gloas forks.
+/// Validates the execution update block hash via a Merkle proof against the
+/// finalized execution root of `consensus_update`.
 ///
-/// For hard forks before Gloas, the execution payload root is a Merkle root
-/// and the block hash must be verified via a Merkle proof. For Gloas and later,
-/// the execution root is the block hash directly, so this validation is skipped.
+/// For Gloas and later forks the execution root is the block hash itself,
+/// so this validation is skipped.
 ///
-/// This validation is required for L2 chains like Optimism and Arbitrum.
-/// It is not needed for Ethereum mainnet.
-///
-/// # Arguments
-///
-/// * `ctx` - Chain context for computing fork specification
-/// * `consensus_update` - The consensus update containing the finalized beacon header
-/// * `execution_update` - The execution update containing the block hash proof
-///
-/// # Errors
-///
-/// Returns an error if the block hash Merkle proof verification fails.
+/// Required for L2 chains like Optimism and Arbitrum; not needed for Ethereum mainnet.
 pub fn validate_execution_update<const SYNC_COMMITTEE_SIZE: usize, CC, CU>(
     ctx: &CC,
     consensus_update: &CU,
@@ -49,21 +38,8 @@ where
     Ok(())
 }
 
-/// Validates the execution update block hash for pre-Gloas forks using a raw execution root.
-///
-/// This is a lower-level variant that takes the execution root directly rather than
-/// extracting it from a consensus update.
-///
-/// # Arguments
-///
-/// * `ctx` - Chain context for computing fork specification
-/// * `slot` - The beacon slot to determine the fork specification
-/// * `execution_root` - The trusted execution payload root
-/// * `execution_update` - The execution update containing the block hash proof
-///
-/// # Errors
-///
-/// Returns an error if the block hash Merkle proof verification fails.
+/// Like [`validate_execution_update`], but takes the execution root and slot directly
+/// instead of extracting them from a consensus update.
 pub fn validate_execution_update_with_root<CC>(
     ctx: &CC,
     slot: u64,
@@ -140,11 +116,5 @@ mod tests {
             Err(Error::InvalidBlockHashMerkleBranch { .. }) => {}
             _ => panic!("Expected InvalidBlockHashMerkleBranch error"),
         }
-    }
-
-    #[test]
-    fn test_block_number_to_block_hash_diff_constant() {
-        // Block hash is 6 positions after block number in ExecutionPayload
-        assert_eq!(BLOCK_NUMBER_TO_BLOCK_HASH_DIFF, 6);
     }
 }

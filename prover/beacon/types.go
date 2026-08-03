@@ -187,7 +187,10 @@ func rootHexStringToBytes(s string) ([32]byte, error) {
 	var root [32]byte
 	bz, err := hex.DecodeString(strings.TrimPrefix(s, "0x"))
 	if err != nil {
-		return root, nil
+		return root, err
+	}
+	if len(bz) != 32 {
+		return root, fmt.Errorf("invalid root length: expected 32, got %d", len(bz))
 	}
 	copy(root[:], bz)
 	return root, nil

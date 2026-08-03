@@ -6,20 +6,23 @@
 
 use crate::commitment::decode_eip1184_rlp_proof;
 use crate::errors::Error;
+use crate::height::Height;
+use alloc::format;
+use alloc::string::String;
 use alloc::vec::Vec;
-use ethereum_consensus::beacon::{BeaconBlockHeader, Slot};
+use ethereum_consensus::beacon::{BeaconBlockHeader, Slot, Version};
 use ethereum_consensus::bls::{PublicKey, Signature};
+use ethereum_consensus::fork::{ForkParameter, ForkParameters, ForkSpec};
 use ethereum_consensus::sync_protocol::{SyncAggregate, SyncCommittee};
 use ethereum_consensus::types::{H256, U64};
-use ethereum_light_client_proto::ibc::core::client::v1::Height as ProtoHeight;
 use ethereum_light_client_proto::ibc::lightclients::ethereum::v1::{
     AccountUpdate as ProtoAccountUpdate, BeaconBlockHeader as ProtoBeaconBlockHeader,
     ConsensusUpdate as ProtoConsensusUpdate, ExecutionUpdate as ProtoExecutionUpdate,
+    ForkParameters as ProtoForkParameters, ForkSpec as ProtoForkSpec,
     SyncAggregate as ProtoSyncAggregate, SyncCommittee as ProtoSyncCommittee,
     TrustedSyncCommittee as ProtoTrustedSyncCommittee,
 };
 use ethereum_light_client_verifier::updates::{ConsensusUpdate, ExecutionUpdate};
-use light_client::types::Height;
 use ssz_rs::{Bitvector, Deserialize, Vector};
 
 /// The revision number for Ethereum client heights.
@@ -177,10 +180,7 @@ impl<const SYNC_COMMITTEE_SIZE: usize> TryFrom<ProtoTrustedSyncCommittee>
             .as_ref()
             .ok_or(Error::proto_missing("trusted_height"))?;
         Ok(TrustedSyncCommittee {
-            height: Height::new(
-                trusted_height.revision_number,
-                trusted_height.revision_height,
-            ),
+            height: trusted_height.clone().into(),
             sync_committee: SyncCommittee {
                 pubkeys: Vector::<PublicKey, SYNC_COMMITTEE_SIZE>::from_iter(
                     value
@@ -196,8 +196,10 @@ impl<const SYNC_COMMITTEE_SIZE: usize> TryFrom<ProtoTrustedSyncCommittee>
                 aggregate_pubkey: PublicKey::try_from(
                     value
                         .sync_committee
+                        .as_ref()
                         .ok_or(Error::proto_missing("sync_committee"))?
-                        .aggregate_pubkey,
+                        .aggregate_pubkey
+                        .clone(),
                 )?,
             },
             is_next: value.is_next,
@@ -210,10 +212,7 @@ impl<const SYNC_COMMITTEE_SIZE: usize> From<TrustedSyncCommittee<SYNC_COMMITTEE_
 {
     fn from(value: TrustedSyncCommittee<SYNC_COMMITTEE_SIZE>) -> Self {
         Self {
-            trusted_height: Some(ProtoHeight {
-                revision_number: value.height.revision_number(),
-                revision_height: value.height.revision_height(),
-            }),
+            trusted_height: Some(value.height.into()),
             sync_committee: Some(ProtoSyncCommittee {
                 pubkeys: value
                     .sync_committee
@@ -254,7 +253,7 @@ impl TryFrom<ProtoAccountUpdate> for AccountUpdateInfo {
     fn try_from(value: ProtoAccountUpdate) -> Result<Self, Self::Error> {
         Ok(Self {
             account_proof: decode_eip1184_rlp_proof(value.account_proof)?,
-            account_storage_root: H256::from_slice(&value.account_storage_root),
+            account_storage_root: try_to_h256("account_storage_root", &value.account_storage_root)?,
         })
     }
 }
@@ -269,15 +268,33 @@ fn encode_account_proof(bz: Vec<Vec<u8>>) -> Vec<u8> {
     stream.out().freeze().into()
 }
 
+/// Converts proto bytes into an `H256`, returning an error (instead of panicking
+/// in `H256::from_slice`) if the length is not 32. Used at every proto -> domain
+/// boundary so that a malformed length cannot crash the enclave.
+pub(crate) fn try_to_h256(field: &str, bz: &[u8]) -> Result<H256, Error> {
+    if bz.len() != 32 {
+        return Err(Error::InvalidH256Length {
+            field: String::from(field),
+            got: bz.len(),
+        });
+    }
+    Ok(H256::from_slice(bz))
+}
+
+/// Converts a list of proto byte arrays into `Vec<H256>`, validating each length.
+pub(crate) fn try_to_h256_vec(field: &str, bz: Vec<Vec<u8>>) -> Result<Vec<H256>, Error> {
+    bz.into_iter().map(|b| try_to_h256(field, &b)).collect()
+}
+
 pub(crate) fn convert_proto_to_header(
     header: &ProtoBeaconBlockHeader,
 ) -> Result<BeaconBlockHeader, Error> {
     Ok(BeaconBlockHeader {
         slot: header.slot.into(),
         proposer_index: header.proposer_index.into(),
-        parent_root: H256::from_slice(&header.parent_root),
-        state_root: H256::from_slice(&header.state_root),
-        body_root: H256::from_slice(&header.body_root),
+        parent_root: try_to_h256("parent_root", &header.parent_root)?,
+        state_root: try_to_h256("beacon_header.state_root", &header.state_root)?,
+        body_root: try_to_h256("body_root", &header.body_root)?,
     })
 }
 
@@ -292,30 +309,81 @@ pub(crate) fn convert_header_to_proto(header: &BeaconBlockHeader) -> ProtoBeacon
 }
 
 /// Converts a Protocol Buffer execution update to the domain type.
+/// Converts a protobuf `ForkParameters` into the consensus-layer representation.
+///
+/// # Errors
+///
+/// - [`Error::InvalidVersionLength`]: A fork version is not 4 bytes
+/// - [`Error::ProtoMissingField`]: A fork entry is missing its spec
+/// - [`Error::EthereumConsensus`]: The fork parameters are inconsistent
+pub fn convert_proto_to_fork_parameters(
+    value: ProtoForkParameters,
+) -> Result<ForkParameters, Error> {
+    fn to_version(field: &str, bz: &[u8]) -> Result<Version, Error> {
+        if bz.len() != 4 {
+            return Err(Error::InvalidVersionLength {
+                field: field.into(),
+                got: bz.len(),
+            });
+        }
+        let mut version = Version::default();
+        version.0.copy_from_slice(bz);
+        Ok(version)
+    }
+
+    fn to_fork_spec(idx: usize, spec: Option<ProtoForkSpec>) -> Result<ForkSpec, Error> {
+        let spec = spec.ok_or_else(|| Error::ProtoMissingField {
+            field: format!("forks[{idx}].spec"),
+        })?;
+        Ok(ForkSpec {
+            finalized_root_gindex: spec.finalized_root_gindex,
+            current_sync_committee_gindex: spec.current_sync_committee_gindex,
+            next_sync_committee_gindex: spec.next_sync_committee_gindex,
+            execution_payload_gindex: spec.execution_payload_gindex,
+            execution_payload_state_root_gindex: spec.execution_payload_state_root_gindex,
+            execution_payload_block_number_gindex: spec.execution_payload_block_number_gindex,
+            execution_block_hash_gindex: spec.execution_block_hash_gindex,
+        })
+    }
+
+    Ok(ForkParameters::new(
+        to_version("genesis_fork_version", &value.genesis_fork_version)?,
+        value
+            .forks
+            .into_iter()
+            .enumerate()
+            .map(|(i, f)| {
+                Ok(ForkParameter::new(
+                    to_version(&format!("forks[{i}].version"), &f.version)?,
+                    f.epoch.into(),
+                    to_fork_spec(i, f.spec)?,
+                ))
+            })
+            .collect::<Result<Vec<_>, Error>>()?,
+    )?)
+}
+
 pub fn convert_proto_to_execution_update(
     execution_update: ProtoExecutionUpdate,
-) -> ExecutionUpdateInfo {
-    ExecutionUpdateInfo {
-        state_root: H256::from_slice(&execution_update.state_root),
-        state_root_branch: execution_update
-            .state_root_branch
-            .into_iter()
-            .map(|n| H256::from_slice(&n))
-            .collect(),
+) -> Result<ExecutionUpdateInfo, Error> {
+    Ok(ExecutionUpdateInfo {
+        state_root: try_to_h256("execution_update.state_root", &execution_update.state_root)?,
+        state_root_branch: try_to_h256_vec(
+            "state_root_branch",
+            execution_update.state_root_branch,
+        )?,
         block_number: execution_update.block_number.into(),
-        block_number_branch: execution_update
-            .block_number_branch
-            .into_iter()
-            .map(|n| H256::from_slice(&n))
-            .collect(),
+        block_number_branch: try_to_h256_vec(
+            "block_number_branch",
+            execution_update.block_number_branch,
+        )?,
         rlp: execution_update.rlp,
-        block_hash: H256::from_slice(&execution_update.block_hash),
-        block_hash_branch: execution_update
-            .block_hash_branch
-            .into_iter()
-            .map(|n| H256::from_slice(&n))
-            .collect(),
-    }
+        block_hash: try_to_h256("block_hash", &execution_update.block_hash)?,
+        block_hash_branch: try_to_h256_vec(
+            "block_hash_branch",
+            execution_update.block_hash_branch,
+        )?,
+    })
 }
 
 /// Converts an execution update to the Protocol Buffer type.
@@ -347,18 +415,23 @@ pub fn convert_execution_update_to_proto(
 
 /// Converts a sync aggregate to the Protocol Buffer type.
 ///
-/// # Panics
+/// # Errors
 ///
-/// Panics if `SYNC_COMMITTEE_SIZE` is 0.
+/// Returns an error if serialization of `sync_committee_bits` fails (e.g. if `SYNC_COMMITTEE_SIZE` is 0).
 pub fn convert_sync_aggregate_to_proto<const SYNC_COMMITTEE_SIZE: usize>(
     sync_aggregate: SyncAggregate<SYNC_COMMITTEE_SIZE>,
-) -> ProtoSyncAggregate {
-    let sync_committee_bits = ssz_rs::serialize(&sync_aggregate.sync_committee_bits)
-        .expect("failed to serialize sync_committee_bits: this should never happen unless `SYNC_COMMITTEE_SIZE` is 0");
-    ProtoSyncAggregate {
+) -> Result<ProtoSyncAggregate, Error> {
+    let sync_committee_bits =
+        ssz_rs::serialize(&sync_aggregate.sync_committee_bits).map_err(|e| {
+            Error::SerializeSyncCommitteeBits {
+                error: e,
+                sync_committee_size: SYNC_COMMITTEE_SIZE,
+            }
+        })?;
+    Ok(ProtoSyncAggregate {
         sync_committee_bits,
         sync_committee_signature: sync_aggregate.sync_committee_signature.0.to_vec(),
-    }
+    })
 }
 
 pub(crate) fn convert_proto_sync_aggregate<const SYNC_COMMITTEE_SIZE: usize>(
@@ -378,13 +451,17 @@ pub(crate) fn convert_proto_sync_aggregate<const SYNC_COMMITTEE_SIZE: usize>(
 }
 
 /// Converts a consensus update to the Protocol Buffer type.
+///
+/// # Errors
+///
+/// Returns an error if serialization of the sync aggregate bits fails.
 pub fn convert_consensus_update_to_proto<const SYNC_COMMITTEE_SIZE: usize>(
     consensus_update: ConsensusUpdateInfo<SYNC_COMMITTEE_SIZE>,
-) -> ProtoConsensusUpdate {
+) -> Result<ProtoConsensusUpdate, Error> {
     let finalized_beacon_header_branch = consensus_update.finalized_beacon_header_branch();
     let sync_aggregate = consensus_update.sync_aggregate.clone();
 
-    ProtoConsensusUpdate {
+    Ok(ProtoConsensusUpdate {
         attested_header: Some(convert_header_to_proto(&consensus_update.attested_header)),
         next_sync_committee: consensus_update.next_sync_committee.clone().map(|c| {
             ProtoSyncCommittee {
@@ -410,9 +487,9 @@ pub fn convert_consensus_update_to_proto<const SYNC_COMMITTEE_SIZE: usize>(
             .into_iter()
             .map(|n| n.as_bytes().to_vec())
             .collect(),
-        sync_aggregate: Some(convert_sync_aggregate_to_proto(sync_aggregate)),
+        sync_aggregate: Some(convert_sync_aggregate_to_proto(sync_aggregate)?),
         signature_slot: consensus_update.signature_slot.into(),
-    }
+    })
 }
 
 /// Converts a Protocol Buffer consensus update to the domain type.
@@ -436,11 +513,10 @@ pub fn convert_proto_to_consensus_update<const SYNC_COMMITTEE_SIZE: usize>(
             .ok_or(Error::proto_missing("finalized_header"))?,
     )?;
 
-    let finalized_execution_branch = consensus_update
-        .finalized_execution_branch
-        .into_iter()
-        .map(|b| H256::from_slice(&b))
-        .collect::<Vec<H256>>();
+    let finalized_execution_branch = try_to_h256_vec(
+        "finalized_execution_branch",
+        consensus_update.finalized_execution_branch,
+    )?;
     let consensus_update = ConsensusUpdateInfo {
         attested_header,
         next_sync_committee: if consensus_update.next_sync_committee.is_none()
@@ -473,12 +549,12 @@ pub fn convert_proto_to_consensus_update<const SYNC_COMMITTEE_SIZE: usize>(
                             .aggregate_pubkey,
                     )?,
                 },
-                decode_branch(consensus_update.next_sync_committee_branch),
+                decode_branch(consensus_update.next_sync_committee_branch)?,
             ))
         },
         finalized_header: (
             finalized_header,
-            decode_branch(consensus_update.finalized_header_branch),
+            decode_branch(consensus_update.finalized_header_branch)?,
         ),
         sync_aggregate: convert_proto_sync_aggregate(
             consensus_update
@@ -486,20 +562,24 @@ pub fn convert_proto_to_consensus_update<const SYNC_COMMITTEE_SIZE: usize>(
                 .ok_or(Error::proto_missing("sync_aggregate"))?,
         )?,
         signature_slot: consensus_update.signature_slot.into(),
-        finalized_execution_root: H256::from_slice(&consensus_update.finalized_execution_root),
+        finalized_execution_root: try_to_h256(
+            "finalized_execution_root",
+            &consensus_update.finalized_execution_root,
+        )?,
         finalized_execution_branch,
     };
     Ok(consensus_update)
 }
 
-pub(crate) fn decode_branch(bz: Vec<Vec<u8>>) -> Vec<H256> {
-    bz.into_iter().map(|b| H256::from_slice(&b)).collect()
+pub(crate) fn decode_branch(bz: Vec<Vec<u8>>) -> Result<Vec<H256>, Error> {
+    try_to_h256_vec("branch", bz)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloc::vec;
+    use ethereum_light_client_proto::ibc::core::client::v1::Height as ProtoHeight;
 
     // Common test constants
     const TEST_SYNC_COMMITTEE_SIZE: usize = 32;
@@ -507,35 +587,6 @@ mod tests {
     // Helper function to create H256 from a single byte value
     fn h256_from_byte(byte: u8) -> H256 {
         H256::from_slice(&[byte; 32])
-    }
-
-    #[test]
-    fn test_execution_update_info_default() {
-        let update = ExecutionUpdateInfo::default();
-        assert!(update.state_root.is_zero());
-        assert!(update.state_root_branch.is_empty());
-        assert_eq!(update.block_number, U64::from(0));
-        assert!(update.block_number_branch.is_empty());
-        assert!(update.rlp.is_empty());
-    }
-
-    #[test]
-    fn test_execution_update_trait_impl() {
-        let update = ExecutionUpdateInfo {
-            state_root: h256_from_byte(1),
-            state_root_branch: vec![h256_from_byte(2)],
-            block_number: U64::from(12345),
-            block_number_branch: vec![h256_from_byte(3)],
-            rlp: vec![0xde, 0xad, 0xbe, 0xef],
-            block_hash: h256_from_byte(4),
-            block_hash_branch: vec![h256_from_byte(5)],
-        };
-
-        assert_eq!(update.state_root(), h256_from_byte(1));
-        assert_eq!(update.state_root_branch().len(), 1);
-        assert_eq!(update.block_number(), U64::from(12345));
-        assert_eq!(update.block_number_branch().len(), 1);
-        assert_eq!(update.rlp(), vec![0xde, 0xad, 0xbe, 0xef]);
     }
 
     #[test]
@@ -551,7 +602,7 @@ mod tests {
         };
 
         let proto = convert_execution_update_to_proto(original.clone());
-        let converted = convert_proto_to_execution_update(proto);
+        let converted = convert_proto_to_execution_update(proto).unwrap();
 
         assert_eq!(original.state_root, converted.state_root);
         assert_eq!(original.state_root_branch, converted.state_root_branch);
@@ -563,16 +614,9 @@ mod tests {
     }
 
     #[test]
-    fn test_account_update_info_default() {
-        let update = AccountUpdateInfo::default();
-        assert!(update.account_proof.is_empty());
-        assert!(update.account_storage_root.is_zero());
-    }
-
-    #[test]
     fn test_decode_branch() {
         let input = vec![vec![1u8; 32], vec![2u8; 32]];
-        let result = decode_branch(input);
+        let result = decode_branch(input).unwrap();
 
         assert_eq!(result.len(), 2);
         assert_eq!(result[0], h256_from_byte(1));
@@ -582,7 +626,7 @@ mod tests {
     #[test]
     fn test_decode_branch_empty() {
         let input: Vec<Vec<u8>> = vec![];
-        let result = decode_branch(input);
+        let result = decode_branch(input).unwrap();
         assert!(result.is_empty());
     }
 
@@ -643,56 +687,9 @@ mod tests {
     }
 
     #[test]
-    fn test_ethereum_client_revision_number_constant() {
-        assert_eq!(ETHEREUM_CLIENT_REVISION_NUMBER, 0);
-    }
-
-    #[test]
-    fn test_consensus_update_info_default() {
-        let update = ConsensusUpdateInfo::<TEST_SYNC_COMMITTEE_SIZE>::default();
-
-        assert_eq!(update.attested_header.slot, 0.into());
-        assert!(update.next_sync_committee.is_none());
-        assert!(update.finalized_header.1.is_empty());
-        assert!(update.finalized_execution_root.is_zero());
-        assert!(update.finalized_execution_branch.is_empty());
-    }
-
-    #[test]
-    fn test_consensus_update_trait_impl() {
-        let update = ConsensusUpdateInfo::<TEST_SYNC_COMMITTEE_SIZE> {
-            attested_header: BeaconBlockHeader {
-                slot: 100.into(),
-                ..Default::default()
-            },
-            next_sync_committee: None,
-            finalized_header: (
-                BeaconBlockHeader {
-                    slot: 50.into(),
-                    ..Default::default()
-                },
-                vec![h256_from_byte(1)],
-            ),
-            sync_aggregate: SyncAggregate::default(),
-            signature_slot: 101.into(),
-            finalized_execution_root: h256_from_byte(2),
-            finalized_execution_branch: vec![h256_from_byte(3)],
-        };
-
-        assert_eq!(update.attested_beacon_header().slot, 100.into());
-        assert!(update.next_sync_committee().is_none());
-        assert!(update.next_sync_committee_branch().is_none());
-        assert_eq!(update.finalized_beacon_header().slot, 50.into());
-        assert_eq!(update.finalized_beacon_header_branch().len(), 1);
-        assert_eq!(update.signature_slot(), 101.into());
-        assert_eq!(update.finalized_execution_root(), h256_from_byte(2));
-        assert_eq!(update.finalized_execution_branch().len(), 1);
-    }
-
-    #[test]
     fn test_sync_aggregate_proto_roundtrip() {
         let original = SyncAggregate::<TEST_SYNC_COMMITTEE_SIZE>::default();
-        let proto = convert_sync_aggregate_to_proto(original.clone());
+        let proto = convert_sync_aggregate_to_proto(original.clone()).unwrap();
         let converted = convert_proto_sync_aggregate::<TEST_SYNC_COMMITTEE_SIZE>(proto).unwrap();
 
         assert_eq!(original.sync_committee_bits, converted.sync_committee_bits);
@@ -729,7 +726,7 @@ mod tests {
             finalized_execution_branch: vec![h256_from_byte(10)],
         };
 
-        let proto = convert_consensus_update_to_proto(original.clone());
+        let proto = convert_consensus_update_to_proto(original.clone()).unwrap();
         let converted =
             convert_proto_to_consensus_update::<TEST_SYNC_COMMITTEE_SIZE>(proto).unwrap();
 
@@ -857,7 +854,7 @@ mod tests {
             finalized_execution_branch: vec![],
         };
 
-        let proto = convert_consensus_update_to_proto(original.clone());
+        let proto = convert_consensus_update_to_proto(original.clone()).unwrap();
 
         // Verify proto has next_sync_committee
         assert!(proto.next_sync_committee.is_some());

@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"slices"
 
-	"github.com/hyperledger-labs/yui-relayer/log"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
@@ -34,7 +33,6 @@ func NewHTTPFetcher(endpoint string) *HTTPFetcher {
 }
 
 func (f *HTTPFetcher) Get(ctx context.Context, path string, result any) error {
-	log.GetLogger().DebugContext(ctx, "Beacon API request", "endpoint", f.endpoint+path)
 	req, err := http.NewRequestWithContext(ctx, "GET", f.endpoint+path, nil)
 	if err != nil {
 		return err
@@ -50,10 +48,21 @@ func (f *HTTPFetcher) Get(ctx context.Context, path string, result any) error {
 		return err
 	}
 	if r.StatusCode < 200 || r.StatusCode >= 300 {
-		log.GetLogger().DebugContext(ctx, "Non 2xx response to Beacon API request", "endpoint", f.endpoint+path, "status code", r.StatusCode, "response body", string(bz))
-		return fmt.Errorf("request returned status code %d", r.StatusCode)
+		return fmt.Errorf("request to %s returned status code %d: body=%s", f.endpoint+path, r.StatusCode, truncateForError(bz))
 	}
-	return json.Unmarshal(bz, &result)
+	if err := json.Unmarshal(bz, result); err != nil {
+		return fmt.Errorf("failed to unmarshal response from %s: body=%s: %w", f.endpoint+path, truncateForError(bz), err)
+	}
+	return nil
+}
+
+// truncateForError bounds a response body embedded in an error message.
+func truncateForError(body []byte) string {
+	const maxLen = 1024
+	if len(body) > maxLen {
+		return string(body[:maxLen]) + "...(truncated)"
+	}
+	return string(body)
 }
 
 type Client struct {
@@ -119,9 +128,12 @@ func (cl Client) GetLightClientUpdates(ctx context.Context, period uint64, count
 	if err := cl.fetcher.Get(ctx, fmt.Sprintf("/eth/v1/beacon/light_client/updates?start_period=%v&count=%v", period, count), &res); err != nil {
 		return nil, err
 	}
-	if len(res) != int(count) {
+	if len(res) < int(count) {
 		return nil, fmt.Errorf("unexpected response length: expected=%v actual=%v", count, len(res))
 	}
+	// Some public nodes ignore the `count` parameter and return more updates
+	// than requested; keep only the requested prefix.
+	res = res[:count]
 	for i := range res {
 		if !IsSupportedVersion(res[i].Version) {
 			return nil, fmt.Errorf("unsupported version: %v", res[i].Version)

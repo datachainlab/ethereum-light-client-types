@@ -4,12 +4,12 @@
 //! that can occur during light client operations, including verification
 //! failures, state transition errors, and serialization issues.
 
+use crate::height::Height;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::time::Duration;
 use ethereum_consensus::bls::PublicKey;
 use ethereum_consensus::types::{H256, U64};
-use light_client::types::{Height, Time};
 
 /// Error type for Ethereum light client operations.
 #[derive(Debug, thiserror::Error)]
@@ -87,21 +87,25 @@ pub enum Error {
     },
 
     // ========================================================================
-    // Time validation errors
+    // Time validation errors (timestamps are unix nanoseconds)
     // ========================================================================
     #[error("current time {current} is before trusted state time {trusted}")]
-    CurrentTimeBeforeTrustedState { current: Time, trusted: Time },
+    CurrentTimeBeforeTrustedState { current: u128, trusted: u128 },
     #[error("out of trusting period: current_timestamp={current_timestamp} trusting_period_end={trusting_period_end}")]
     OutOfTrustingPeriod {
-        current_timestamp: Time,
-        trusting_period_end: Time,
+        current_timestamp: u128,
+        trusting_period_end: u128,
     },
     #[error("header is coming from future: current_timestamp={current_timestamp} clock_drift={clock_drift:?} header_timestamp={header_timestamp}")]
     HeaderFromFuture {
-        current_timestamp: Time,
+        current_timestamp: u128,
         clock_drift: Duration,
-        header_timestamp: Time,
+        header_timestamp: u128,
     },
+    #[error("zero timestamp")]
+    ZeroTimestamp,
+    #[error("unexpected header timestamp: expected={expected} actual={actual}")]
+    UnexpectedTimestamp { expected: u128, actual: u128 },
 
     // ========================================================================
     // Serialization errors
@@ -114,18 +118,23 @@ pub enum Error {
         sync_committee_size: usize,
         sync_committee_bits: Vec<u8>,
     },
+    #[error("serialize sync committee bits: {error:?} sync_committee_size={sync_committee_size}")]
+    SerializeSyncCommitteeBits {
+        error: ssz_rs::SerializeError,
+        sync_committee_size: usize,
+    },
     #[error("proto missing field: {field}")]
     ProtoMissingField { field: String },
+    #[error("invalid H256 length for field {field}: expected 32, got {got}")]
+    InvalidH256Length { field: String, got: usize },
+    #[error("invalid version length for field {field}: expected 4, got {got}")]
+    InvalidVersionLength { field: String, got: usize },
 
     // ========================================================================
     // External library errors (with impl From)
     // ========================================================================
     #[error("ethereum consensus error: {0:?}")]
     EthereumConsensus(ethereum_consensus::errors::Error),
-    #[error("time error: {0:?}")]
-    Time(light_client::types::TimeError),
-    #[error("LCP error: {0:?}")]
-    Lcp(light_client::Error),
 }
 
 impl Error {
@@ -139,17 +148,5 @@ impl Error {
 impl From<ethereum_consensus::errors::Error> for Error {
     fn from(e: ethereum_consensus::errors::Error) -> Self {
         Error::EthereumConsensus(e)
-    }
-}
-
-impl From<light_client::types::TimeError> for Error {
-    fn from(e: light_client::types::TimeError) -> Self {
-        Error::Time(e)
-    }
-}
-
-impl From<light_client::Error> for Error {
-    fn from(e: light_client::Error) -> Self {
-        Error::Lcp(e)
     }
 }

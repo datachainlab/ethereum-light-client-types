@@ -1,16 +1,13 @@
 //! Client state trait for Ethereum light client.
 
+use crate::height::Height;
 use ethereum_consensus::types::H256;
-use light_client::types::Height;
 
 /// Trait representing the state of an Ethereum light client.
 ///
 /// This trait defines the minimal interface required for client state
 /// operations in IBC verification workflows.
 pub trait ClientState {
-    /// Returns whether this client has been frozen due to misbehaviour.
-    fn is_frozen(&self) -> bool;
-
     /// Returns the latest verified height of this client.
     fn latest_height(&self) -> Height;
 

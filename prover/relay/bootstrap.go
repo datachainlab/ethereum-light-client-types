@@ -19,8 +19,10 @@ func GetBootstrapInPeriod(ctx context.Context, beaconClient beacon.Client, netwo
 	for i := startSlot + slotsPerEpoch; i <= lastSlotInPeriod; i += slotsPerEpoch {
 		res, err := beaconClient.GetBlockRoot(ctx, i, false)
 		if err != nil {
+			// A missing block root at one epoch-boundary slot must not abort the whole
+			// period scan; try the next boundary slot (consistent with the GetBootstrap path).
 			errs = append(errs, err)
-			return nil, fmt.Errorf("there is no available bootstrap in period: period=%v err=%v", period, errors.Join(errs...))
+			continue
 		}
 		bootstrap, err := beaconClient.GetBootstrap(ctx, res.Data.Root[:])
 		if err != nil {

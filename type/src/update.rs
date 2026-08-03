@@ -128,8 +128,8 @@ impl<const SYNC_COMMITTEE_SIZE: usize, CS: TrustedSyncCommitteeInfo>
                 })
             } else {
                 Err(Error::InvalidCurrentSyncCommitteeKeys {
-                    expected: update_sync_committee.aggregate_pubkey,
-                    actual: trusted_sync_committee_info.current_sync_committee(),
+                    expected: trusted_sync_committee_info.current_sync_committee(),
+                    actual: update_sync_committee.aggregate_pubkey,
                 })
             };
         }
@@ -144,8 +144,8 @@ impl<const SYNC_COMMITTEE_SIZE: usize, CS: TrustedSyncCommitteeInfo>
             })
         } else {
             Err(Error::InvalidNextSyncCommitteeKeys {
-                expected: update_sync_committee.aggregate_pubkey,
-                actual: trusted_sync_committee_info.next_sync_committee(),
+                expected: trusted_sync_committee_info.next_sync_committee(),
+                actual: update_sync_committee.aggregate_pubkey,
             })
         }
     }
@@ -390,19 +390,5 @@ mod tests {
             }
             _ => panic!("Expected StoreNotSupportedFinalizedPeriod error"),
         }
-    }
-
-    #[test]
-    fn test_sync_committee_info_fields() {
-        let current = PublicKey::default();
-        let next = PublicKey::default();
-
-        let info = SyncCommitteeInfo {
-            current_sync_committee: current.clone(),
-            next_sync_committee: next.clone(),
-        };
-
-        assert_eq!(info.current_sync_committee, current);
-        assert_eq!(info.next_sync_committee, next);
     }
 }

@@ -28,6 +28,10 @@ func BuildExecutionUpdate(executionHeader *beacon.ExecutionPayloadHeader, includ
 		StateRootBranch:   stateRootBranch,
 		BlockNumber:       executionHeader.BlockNumber,
 		BlockNumberBranch: blockNumberBranch,
+		// BlockHash must always be a well-formed 32-byte value. It is only meaningful
+		// for the optimism L1 light client; otherwise send the zero hash (the ethereum
+		// light client does not use it).
+		BlockHash: make([]byte, 32),
 	}
 	if includeBlockHash {
 		blockHashBranch, err := GenerateExecutionPayloadHeaderProof(executionHeader, EXECUTION_BLOCK_HASH_LEAF_INDEX)

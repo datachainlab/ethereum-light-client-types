@@ -1,0 +1,7 @@
+version: v1
+deps:
+  - buf.build/cosmos/gogo-proto
+  - buf.build/cosmos/ibc:e2006674271c4a53bf0b98b66de0fc50
+build:
+  excludes:
+    - third_party

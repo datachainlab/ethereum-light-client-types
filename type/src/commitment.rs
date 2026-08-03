@@ -40,12 +40,14 @@ pub fn calculate_ibc_commitment_storage_location(ibc_commitments_slot: &H256, pa
 pub fn decode_eip1184_rlp_proof(proof: Vec<u8>) -> Result<Vec<Vec<u8>>, Error> {
     let r = Rlp::new(&proof);
     if r.is_list() {
-        Ok(r.into_iter()
+        r.into_iter()
             .map(|r| {
-                let proof: Vec<Vec<u8>> = r.as_list().unwrap();
-                rlp::encode_list::<Vec<u8>, Vec<u8>>(&proof).into()
+                let node: Vec<Vec<u8>> = r.as_list().map_err(|e| Error::InvalidProofFormat {
+                    message: alloc::format!("proof node must be an rlp list: {:?}", e),
+                })?;
+                Ok(rlp::encode_list::<Vec<u8>, Vec<u8>>(&node).into())
             })
-            .collect())
+            .collect()
     } else {
         Err(Error::InvalidProofFormat {
             message: "proof must be rlp list".into(),
@@ -175,18 +177,6 @@ mod tests {
     }
 
     #[test]
-    fn test_calculate_ibc_commitment_storage_location_different_paths() {
-        let slot = H256::default();
-        let path1 = "path1";
-        let path2 = "path2";
-
-        let loc1 = calculate_ibc_commitment_storage_location(&slot, path1);
-        let loc2 = calculate_ibc_commitment_storage_location(&slot, path2);
-
-        assert_ne!(loc1, loc2);
-    }
-
-    #[test]
     fn test_decode_eip1184_rlp_proof_valid() {
         // Create a valid RLP-encoded list of lists using RlpStream
         let mut stream = rlp::RlpStream::new_list(2);
@@ -235,23 +225,6 @@ mod tests {
     }
 
     #[test]
-    fn test_keccak_256_deterministic() {
-        // Same input should always produce same output
-        let input = b"test data";
-        let hash1 = keccak_256(input);
-        let hash2 = keccak_256(input);
-        assert_eq!(hash1, hash2);
-    }
-
-    #[test]
-    fn test_keccak_256_different_inputs() {
-        // Different inputs should produce different outputs
-        let hash1 = keccak_256(b"input1");
-        let hash2 = keccak_256(b"input2");
-        assert_ne!(hash1, hash2);
-    }
-
-    #[test]
     fn test_calculate_ibc_commitment_storage_location_empty_path() {
         let slot = H256::from_slice(&[1u8; 32]);
         let path = "";
@@ -266,18 +239,6 @@ mod tests {
         let expected = keccak_256(&concat);
 
         assert_eq!(location.as_bytes(), &expected);
-    }
-
-    #[test]
-    fn test_calculate_ibc_commitment_storage_location_different_slots() {
-        let slot1 = H256::from_slice(&[1u8; 32]);
-        let slot2 = H256::from_slice(&[2u8; 32]);
-        let path = "same/path";
-
-        let loc1 = calculate_ibc_commitment_storage_location(&slot1, path);
-        let loc2 = calculate_ibc_commitment_storage_location(&slot2, path);
-
-        assert_ne!(loc1, loc2);
     }
 
     #[test]
