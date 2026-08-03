@@ -108,11 +108,12 @@ pub struct ExecutionUpdate {
     #[prost(bytes = "vec", repeated, tag = "4")]
     pub block_number_branch: ::prost::alloc::vec::Vec<::prost::alloc::vec::Vec<u8>>,
     #[prost(bytes = "vec", tag = "5")]
-    pub rlp: ::prost::alloc::vec::Vec<u8>,
-    #[prost(bytes = "vec", tag = "6")]
     pub block_hash: ::prost::alloc::vec::Vec<u8>,
-    #[prost(bytes = "vec", repeated, tag = "7")]
+    #[prost(bytes = "vec", repeated, tag = "6")]
     pub block_hash_branch: ::prost::alloc::vec::Vec<::prost::alloc::vec::Vec<u8>>,
+    /// RLP-encoded execution block header (for Gloas+)
+    #[prost(bytes = "vec", tag = "7")]
+    pub rlp: ::prost::alloc::vec::Vec<u8>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
