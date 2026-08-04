@@ -8,7 +8,6 @@ import (
 	"github.com/datachainlab/ethereum-light-client-types/prover/execution"
 	"github.com/datachainlab/ethereum-light-client-types/prover/types"
 	"github.com/ethereum/go-ethereum/common"
-	gethtypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/rlp"
 )
 
@@ -44,6 +43,21 @@ func BuildExecutionUpdate(executionHeader *beacon.ExecutionPayloadHeader, includ
 	return update, nil
 }
 
+// Field positions in the RLP-encoded execution block header. The header is a flat
+// RLP list and forks only ever append to it, so the leading positions are stable.
+//
+// Decoding positionally rather than into go-ethereum's types.Header is deliberate:
+// Glamsterdam appends block_access_list_hash (EIP-7928) and slot_number (EIP-7732),
+// which types.Header does not know about, and a struct decode rejects the header with
+// "input list has too many elements". Only these three fields are needed here; the raw
+// RLP is passed through to the verifier, which checks keccak256(rlp) == block hash.
+const (
+	execHeaderStateRootIndex   = 3
+	execHeaderBlockNumberIndex = 8
+	execHeaderTimestampIndex   = 11
+	execHeaderMinFields        = execHeaderTimestampIndex + 1
+)
+
 // BuildExecutionUpdateFromBlockHash builds ExecutionUpdate using RLP verification (Gloas)
 func BuildExecutionUpdateFromBlockHash(ctx context.Context, executionClient execution.RPCClient, blockHash []byte) (*types.ExecutionUpdate, uint64, error) {
 	hash := common.BytesToHash(blockHash)
@@ -54,19 +68,38 @@ func BuildExecutionUpdateFromBlockHash(ctx context.Context, executionClient exec
 		return nil, 0, fmt.Errorf("failed to get raw header: %w", err)
 	}
 
-	// Decode RLP to extract state_root and block_number
-	header := new(gethtypes.Header)
-	if err := rlp.DecodeBytes(rlpHeader, header); err != nil {
+	// Decode RLP to extract state_root, block_number and timestamp
+	var fields []rlp.RawValue
+	if err := rlp.DecodeBytes(rlpHeader, &fields); err != nil {
 		return nil, 0, fmt.Errorf("failed to decode RLP header: %w", err)
+	}
+	if len(fields) < execHeaderMinFields {
+		return nil, 0, fmt.Errorf("unexpected RLP header: got %d fields, want at least %d", len(fields), execHeaderMinFields)
+	}
+
+	var stateRoot common.Hash
+	if err := rlp.DecodeBytes(fields[execHeaderStateRootIndex], &stateRoot); err != nil {
+		return nil, 0, fmt.Errorf("failed to decode state root: %w", err)
+	}
+	var blockNumber uint64
+	if err := rlp.DecodeBytes(fields[execHeaderBlockNumberIndex], &blockNumber); err != nil {
+		return nil, 0, fmt.Errorf("failed to decode block number: %w", err)
+	}
+	var timestamp uint64
+	if err := rlp.DecodeBytes(fields[execHeaderTimestampIndex], &timestamp); err != nil {
+		return nil, 0, fmt.Errorf("failed to decode timestamp: %w", err)
 	}
 
 	// For Gloas, we use RLP verification instead of SSZ merkle proofs
 	// The verifier will check: keccak256(rlp) == execution_block_hash
 	return &types.ExecutionUpdate{
-		StateRoot:   header.Root.Bytes(),
-		BlockNumber: header.Number.Uint64(),
+		StateRoot:   stateRoot.Bytes(),
+		BlockNumber: blockNumber,
 		Rlp:         rlpHeader,
-	}, header.Time, nil
+		// As in BuildExecutionUpdate, BlockHash must always be a well-formed 32-byte
+		// value even when unused, otherwise the verifier rejects it while decoding.
+		BlockHash: make([]byte, 32),
+	}, timestamp, nil
 }
 
 // BuildExecutionUpdateFromFinalizedHeader builds ExecutionUpdate from finalized header.

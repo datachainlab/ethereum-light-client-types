@@ -132,13 +132,16 @@ func encodeRLPProof(proof []string) ([]byte, error) {
 }
 
 // detectNetwork determines the network from the genesis fork version;
-// anything other than mainnet/sepolia is treated as minimal.
+// anything other than mainnet/sepolia/ethpandaops is treated as minimal.
 func detectNetwork(genesisForkVersion [4]byte) string {
 	switch genesisForkVersion {
 	case [4]byte{0x00, 0x00, 0x00, 0x00}:
 		return relay.Mainnet
 	case [4]byte{0x90, 0x00, 0x00, 0x69}:
 		return relay.Sepolia
+	case [4]byte{0x10, 0x00, 0x00, 0x38}:
+		// kurtosis devnet built by ethpandaops/ethereum-package
+		return relay.MinimalEthpandaops
 	default:
 		return relay.Minimal
 	}
@@ -188,6 +191,7 @@ func fetchForkSchedule(ctx context.Context, beaconEndpoint string) (map[string]u
 		relay.Deneb:     "DENEB",
 		relay.Electra:   "ELECTRA",
 		relay.Fulu:      "FULU",
+		relay.Gloas:     "GLOAS",
 	} {
 		e, err := epoch(key)
 		if err != nil {
@@ -308,7 +312,7 @@ func BuildVerifyUpdateRequest(
 
 	// the fork schedule is only consulted for the minimal preset
 	var schedule map[string]uint64
-	if network == relay.Minimal {
+	if network == relay.Minimal || network == relay.MinimalEthpandaops {
 		schedule, err = fetchForkSchedule(ctx, beaconEndpoint)
 		if err != nil {
 			return nil, err
