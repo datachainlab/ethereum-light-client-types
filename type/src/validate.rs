@@ -31,27 +31,9 @@ where
     CU: ConsensusUpdate<SYNC_COMMITTEE_SIZE>,
 {
     let fork_spec = ctx.compute_fork_spec(consensus_update.finalized_beacon_header().slot);
-    if fork_spec.execution_block_hash_gindex == 0 {
+    if !fork_spec.is_gloas() {
         let trusted_execution_root = consensus_update.finalized_execution_root();
         validate_block_hash(execution_update, fork_spec, trusted_execution_root)?;
-    }
-    Ok(())
-}
-
-/// Like [`validate_execution_update`], but takes the execution root and slot directly
-/// instead of extracting them from a consensus update.
-pub fn validate_execution_update_with_root<CC>(
-    ctx: &CC,
-    slot: u64,
-    execution_root: H256,
-    execution_update: &ExecutionUpdateInfo,
-) -> Result<(), Error>
-where
-    CC: ChainConsensusVerificationContext,
-{
-    let fork_spec = ctx.compute_fork_spec(slot.into());
-    if fork_spec.execution_block_hash_gindex == 0 {
-        validate_block_hash(execution_update, fork_spec, execution_root)?;
     }
     Ok(())
 }
