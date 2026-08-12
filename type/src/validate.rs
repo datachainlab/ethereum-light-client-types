@@ -78,9 +78,9 @@ mod tests {
             state_root_branch: vec![],
             block_number: U64::from(0),
             block_number_branch: vec![],
-            rlp: vec![],
             block_hash: H256::default(),
             block_hash_branch: vec![],
+            rlp: vec![],
         }
     }
 
