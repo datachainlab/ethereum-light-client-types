@@ -96,9 +96,9 @@ func BuildExecutionUpdateFromBlockHash(ctx context.Context, executionClient exec
 		StateRoot:   stateRoot.Bytes(),
 		BlockNumber: blockNumber,
 		Rlp:         rlpHeader,
-		// As in BuildExecutionUpdate, BlockHash must always be a well-formed 32-byte
-		// value even when unused, otherwise the verifier rejects it while decoding.
-		BlockHash: make([]byte, 32),
+		// For Gloas the execution root is the block hash itself; the verifier
+		// checks that this equals the consensus update's finalized execution root.
+		BlockHash: hash.Bytes(),
 	}, timestamp, nil
 }
 

@@ -14,11 +14,12 @@ use ethereum_light_client_verifier::updates::ConsensusUpdate;
 /// Difference between block_number gindex and block_hash gindex in ExecutionPayload.
 const BLOCK_NUMBER_TO_BLOCK_HASH_DIFF: u32 = 6;
 
-/// Validates the execution update block hash via a Merkle proof against the
-/// finalized execution root of `consensus_update`.
+/// Validates the execution update block hash against the finalized execution
+/// root of `consensus_update`.
 ///
-/// For Gloas and later forks the execution root is the block hash itself,
-/// so this validation is skipped.
+/// For pre-Gloas forks the block hash is verified via a Merkle proof against
+/// the execution payload root. For Gloas and later forks the execution root is
+/// the block hash itself, so the update's `block_hash` must simply equal it.
 ///
 /// Required for L2 chains like Optimism and Arbitrum; not needed for Ethereum mainnet.
 pub fn validate_execution_update<const SYNC_COMMITTEE_SIZE: usize, CC, CU>(
@@ -31,8 +32,15 @@ where
     CU: ConsensusUpdate<SYNC_COMMITTEE_SIZE>,
 {
     let fork_spec = ctx.compute_fork_spec(consensus_update.finalized_beacon_header().slot);
-    if !fork_spec.is_gloas() {
-        let trusted_execution_root = consensus_update.finalized_execution_root();
+    let trusted_execution_root = consensus_update.finalized_execution_root();
+    if fork_spec.is_gloas() {
+        if execution_update.block_hash != trusted_execution_root {
+            return Err(Error::UnexpectedBlockHash {
+                expected: trusted_execution_root,
+                actual: execution_update.block_hash,
+            });
+        }
+    } else {
         validate_block_hash(execution_update, fork_spec, trusted_execution_root)?;
     }
     Ok(())
@@ -64,9 +72,13 @@ fn validate_block_hash(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::consensus::ConsensusUpdateInfo;
     use alloc::vec;
+    use ethereum_consensus::beacon::Version;
     use ethereum_consensus::fork::deneb::DENEB_FORK_SPEC;
+    use ethereum_consensus::fork::{ForkParameter, ForkParameters};
     use ethereum_consensus::types::U64;
+    use ethereum_light_client_verifier::context::{Fraction, LightClientContext};
 
     fn h256_from_byte(byte: u8) -> H256 {
         H256::from_slice(&[byte; 32])
@@ -82,6 +94,64 @@ mod tests {
             block_hash_branch: vec![],
             rlp: vec![],
         }
+    }
+
+    fn make_context(spec: ethereum_consensus::fork::ForkSpec) -> LightClientContext {
+        LightClientContext::new(
+            ForkParameters::new(
+                Version([0, 0, 0, 1]),
+                vec![ForkParameter::new(
+                    Version([1, 0, 0, 1]),
+                    U64::from(0),
+                    spec,
+                )],
+            )
+            .unwrap(),
+            U64::from(6),
+            U64::from(8),
+            U64::from(8),
+            U64::from(0),
+            Default::default(),
+            1,
+            Fraction::new(2, 3).unwrap(),
+            U64::from(0),
+        )
+    }
+
+    #[test]
+    fn test_validate_execution_update_gloas_block_hash_equality() {
+        let mut gloas_spec = DENEB_FORK_SPEC;
+        gloas_spec.execution_block_hash_gindex = 2856;
+        assert!(gloas_spec.is_gloas());
+        let ctx = make_context(gloas_spec);
+        let consensus_update = ConsensusUpdateInfo::<32> {
+            finalized_execution_root: h256_from_byte(5),
+            ..Default::default()
+        };
+
+        // for Gloas, block_hash must equal the verified execution root (no merkle proof needed)
+        let mut execution_update = create_test_execution_update();
+        execution_update.block_hash = h256_from_byte(5);
+        validate_execution_update::<32, _, _>(&ctx, &consensus_update, &execution_update).unwrap();
+
+        // mismatched block_hash must be rejected
+        execution_update.block_hash = h256_from_byte(6);
+        let result =
+            validate_execution_update::<32, _, _>(&ctx, &consensus_update, &execution_update);
+        assert!(matches!(result, Err(Error::UnexpectedBlockHash { .. })));
+    }
+
+    #[test]
+    fn test_validate_execution_update_requires_proof_pre_gloas() {
+        let ctx = make_context(DENEB_FORK_SPEC);
+        let consensus_update = ConsensusUpdateInfo::<32>::default();
+        let execution_update = create_test_execution_update();
+        let result =
+            validate_execution_update::<32, _, _>(&ctx, &consensus_update, &execution_update);
+        assert!(matches!(
+            result,
+            Err(Error::InvalidBlockHashMerkleBranch { .. })
+        ));
     }
 
     #[test]

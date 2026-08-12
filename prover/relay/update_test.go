@@ -186,6 +186,9 @@ func TestBuildExecutionUpdateFromFinalizedHeader_Gloas(t *testing.T) {
 	if update.Rlp == nil {
 		t.Error("Rlp should not be nil for Gloas")
 	}
+	if !bytes.Equal(update.BlockHash, blockHash[:]) {
+		t.Error("BlockHash must carry the execution block hash for Gloas")
+	}
 	if !bytes.Equal(update.StateRoot, gethHeader.Root.Bytes()) {
 		t.Error("StateRoot mismatch")
 	}

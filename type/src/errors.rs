@@ -75,6 +75,8 @@ pub enum Error {
     InvalidBlockHashMerkleBranch {
         error: ethereum_consensus::errors::MerkleError,
     },
+    #[error("unexpected block hash: expected={expected:?} actual={actual:?}")]
+    UnexpectedBlockHash { expected: H256, actual: H256 },
     #[error("invalid current sync committee keys: expected={expected:?} actual={actual:?}")]
     InvalidCurrentSyncCommitteeKeys {
         expected: PublicKey,
