@@ -108,6 +108,8 @@ pub enum Error {
     ZeroTimestamp,
     #[error("unexpected header timestamp: expected={expected} actual={actual}")]
     UnexpectedTimestamp { expected: u128, actual: u128 },
+    #[error("invalid execution block header rlp")]
+    InvalidExecutionBlockHeaderRlp,
 
     // ========================================================================
     // Serialization errors
