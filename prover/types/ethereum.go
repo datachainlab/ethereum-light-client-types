@@ -50,6 +50,14 @@ func (u *ExecutionUpdate) ValidateBasic() error {
 	if u.StateRoot == nil {
 		return fmt.Errorf("state root cannot be nil")
 	}
+	// Gloas proves the execution header by hashing its RLP instead of walking SSZ merkle
+	// branches, so StateRootBranch/BlockNumberBranch are intentionally absent there.
+	if len(u.Rlp) > 0 {
+		if u.BlockHash == nil {
+			return fmt.Errorf("block hash cannot be nil")
+		}
+		return nil
+	}
 	if u.StateRootBranch == nil {
 		return fmt.Errorf("state root branch cannot be nil")
 	}
