@@ -7,6 +7,7 @@ import (
 
 	"github.com/datachainlab/ethereum-light-client-types/prover/beacon"
 	"github.com/datachainlab/ethereum-light-client-types/prover/execution"
+	"github.com/datachainlab/ethereum-light-client-types/prover/types"
 )
 
 // GetSlotAtTimestamp computes slot from timestamp
@@ -48,7 +49,7 @@ const maxSkippedSlotsLookahead = 64
 // Deriving the period from the execution block's own slot instead would be one period off
 // whenever the finalized slot is the first slot of a period, which makes the prover send
 // the previous period's sync committee.
-func GetConsensusStateSlotWithBlockNumber(ctx context.Context, beaconClient beacon.Client, executionClient execution.RPCClient, network string, minimalForkSchedule map[string]uint64, blockNumber uint64) (uint64, error) {
+func GetConsensusStateSlotWithBlockNumber(ctx context.Context, beaconClient beacon.Client, executionClient execution.RPCClient, network string, forkParameters *types.ForkParameters, blockNumber uint64) (uint64, error) {
 	block, err := execution.GetBlockHeaderFields(ctx, executionClient, blockNumber)
 	if err != nil {
 		return 0, err
@@ -57,7 +58,7 @@ func GetConsensusStateSlotWithBlockNumber(ctx context.Context, beaconClient beac
 	if err != nil {
 		return 0, err
 	}
-	if !IsGloasSlot(network, minimalForkSchedule, slot) {
+	if !forkParameters.IsGloas(ComputeEpoch(network, slot)) {
 		return slot, nil
 	}
 	for next := slot + 1; next <= slot+maxSkippedSlotsLookahead; next++ {
@@ -73,28 +74,12 @@ func GetConsensusStateSlotWithBlockNumber(ctx context.Context, beaconClient beac
 }
 
 // GetPeriodWithBlockNumber returns sync committee period for a block number
-func GetPeriodWithBlockNumber(ctx context.Context, beaconClient beacon.Client, executionClient execution.RPCClient, network string, minimalForkSchedule map[string]uint64, blockNumber uint64) (uint64, error) {
-	slot, err := GetConsensusStateSlotWithBlockNumber(ctx, beaconClient, executionClient, network, minimalForkSchedule, blockNumber)
+func GetPeriodWithBlockNumber(ctx context.Context, beaconClient beacon.Client, executionClient execution.RPCClient, network string, forkParameters *types.ForkParameters, blockNumber uint64) (uint64, error) {
+	slot, err := GetConsensusStateSlotWithBlockNumber(ctx, beaconClient, executionClient, network, forkParameters, blockNumber)
 	if err != nil {
 		return 0, err
 	}
 	return ComputeSyncCommitteePeriod(network, ComputeEpoch(network, slot)), nil
-}
-
-// IsGloasSlot reports whether `slot` is at or after the Gloas fork.
-//
-// Gloas is identified by `execution_block_hash_gindex` being set, which is the same
-// discriminator the Rust verifier uses (`ForkSpec::is_gloas`).
-func IsGloasSlot(network string, minimalForkSchedule map[string]uint64, slot uint64) bool {
-	epoch := ComputeEpoch(network, slot)
-	params := GetForkParameters(network, minimalForkSchedule)
-	for i := len(params.Forks) - 1; i >= 0; i-- {
-		fork := params.Forks[i]
-		if epoch >= fork.Epoch {
-			return fork.Spec != nil && fork.Spec.ExecutionBlockHashGindex != 0
-		}
-	}
-	return false
 }
 
 // ComputeSyncCommitteePeriod computes sync committee period from epoch

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/datachainlab/ethereum-light-client-types/prover/beacon"
+	"github.com/datachainlab/ethereum-light-client-types/prover/types"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 )
@@ -17,11 +18,11 @@ const (
 	testGenesisVersion = "0x00000001"
 )
 
-// gloasFromGenesis / preGloas select which fork `IsGloasSlot` resolves to. Every fork
-// before the one under test must be at epoch 0 so the backwards scan reaches it.
+// gloasFromGenesis / preGloas are the minimal preset's fork parameters with Gloas
+// either already active or still far in the future.
 var (
-	gloasFromGenesis = map[string]uint64{}
-	preGloas         = map[string]uint64{Gloas: 1_000_000}
+	gloasFromGenesis = GetForkParameters(Minimal, map[string]uint64{})
+	preGloas         = GetForkParameters(Minimal, map[string]uint64{Gloas: 1_000_000})
 )
 
 type mockExecutionBlock struct {
@@ -102,8 +103,8 @@ func setBid(t *testing.T, m *MockFetcher, slot uint64, parentBlockHash common.Ha
 
 func TestGetConsensusStateSlotWithBlockNumber(t *testing.T) {
 	tests := []struct {
-		name         string
-		forkSchedule map[string]uint64
+		name           string
+		forkParameters *types.ForkParameters
 		// blockSlot is the slot the target execution block was built for.
 		blockSlot uint64
 		// bids maps a beacon slot to the execution block hash its proposer bid on.
@@ -113,31 +114,31 @@ func TestGetConsensusStateSlotWithBlockNumber(t *testing.T) {
 		wantErr  bool
 	}{
 		{
-			name:         "pre-Gloas returns the block's own slot",
-			forkSchedule: preGloas,
-			blockSlot:    100,
-			expected:     100,
+			name:           "pre-Gloas returns the block's own slot",
+			forkParameters: preGloas,
+			blockSlot:      100,
+			expected:       100,
 		},
 		{
-			name:         "Gloas returns the next slot that bids on the block",
-			forkSchedule: gloasFromGenesis,
-			blockSlot:    100,
-			bids:         map[uint64]common.Hash{101: blockHash(1)},
-			expected:     101,
+			name:           "Gloas returns the next slot that bids on the block",
+			forkParameters: gloasFromGenesis,
+			blockSlot:      100,
+			bids:           map[uint64]common.Hash{101: blockHash(1)},
+			expected:       101,
 		},
 		{
-			name:         "Gloas skips slots without a block",
-			forkSchedule: gloasFromGenesis,
-			blockSlot:    100,
-			bids:         map[uint64]common.Hash{103: blockHash(1)},
-			expected:     103,
+			name:           "Gloas skips slots without a block",
+			forkParameters: gloasFromGenesis,
+			blockSlot:      100,
+			bids:           map[uint64]common.Hash{103: blockHash(1)},
+			expected:       103,
 		},
 		{
 			// The bug this function exists for: the block is built in the last slot of
 			// period 0 but the header referencing it lands in period 1.
-			name:         "Gloas crosses a sync committee period boundary",
-			forkSchedule: gloasFromGenesis,
-			blockSlot:    MINIMAL_EPOCHS_PER_SYNC_COMMITTEE_PERIOD*MINIMAL_SLOTS_PER_EPOCH - 1,
+			name:           "Gloas crosses a sync committee period boundary",
+			forkParameters: gloasFromGenesis,
+			blockSlot:      MINIMAL_EPOCHS_PER_SYNC_COMMITTEE_PERIOD*MINIMAL_SLOTS_PER_EPOCH - 1,
 			bids: map[uint64]common.Hash{
 				MINIMAL_EPOCHS_PER_SYNC_COMMITTEE_PERIOD * MINIMAL_SLOTS_PER_EPOCH: blockHash(1),
 			},
@@ -146,17 +147,17 @@ func TestGetConsensusStateSlotWithBlockNumber(t *testing.T) {
 		{
 			// A block exists but bids on a different parent, so it does not reference
 			// our block. Returning it would send the wrong sync committee.
-			name:         "Gloas rejects a slot bidding on another block",
-			forkSchedule: gloasFromGenesis,
-			blockSlot:    100,
-			bids:         map[uint64]common.Hash{101: blockHash(9)},
-			wantErr:      true,
+			name:           "Gloas rejects a slot bidding on another block",
+			forkParameters: gloasFromGenesis,
+			blockSlot:      100,
+			bids:           map[uint64]common.Hash{101: blockHash(9)},
+			wantErr:        true,
 		},
 		{
-			name:         "Gloas fails when no slot references the block",
-			forkSchedule: gloasFromGenesis,
-			blockSlot:    100,
-			wantErr:      true,
+			name:           "Gloas fails when no slot references the block",
+			forkParameters: gloasFromGenesis,
+			blockSlot:      100,
+			wantErr:        true,
 		},
 	}
 
@@ -178,7 +179,7 @@ func TestGetConsensusStateSlotWithBlockNumber(t *testing.T) {
 				beacon.NewClientWithFetcher(fetcher),
 				executionClient,
 				Minimal,
-				tt.forkSchedule,
+				tt.forkParameters,
 				targetBlockNumber,
 			)
 			if tt.wantErr {
