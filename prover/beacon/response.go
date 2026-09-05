@@ -27,6 +27,25 @@ type BlockRootResponse struct {
 	ExecutionOptimistic bool `json:"execution_optimistic"`
 }
 
+// BeaconBlockBidResponse decodes only the execution payload bid out of a beacon block.
+// A full block is large and nothing else in it is needed, so the remaining fields are
+// deliberately left undecoded. `signed_execution_payload_bid` exists from Gloas onwards
+// (EIP-7732) and is absent for earlier forks.
+type BeaconBlockBidResponse struct {
+	Version string `json:"version"`
+	Data    struct {
+		Message struct {
+			Body struct {
+				SignedExecutionPayloadBid *struct {
+					Message struct {
+						ParentBlockHash hexutil.Bytes `json:"parent_block_hash"`
+					} `json:"message"`
+				} `json:"signed_execution_payload_bid"`
+			} `json:"body"`
+		} `json:"message"`
+	} `json:"data"`
+}
+
 type LightClientHeader struct {
 	Beacon             BeaconBlockHeader
 	Execution          *ExecutionPayloadHeader // Required for pre-Gloas

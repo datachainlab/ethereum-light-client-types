@@ -101,6 +101,28 @@ func (cl Client) GetBlockRoot(ctx context.Context, slot uint64, allowOptimistic 
 	return &res, nil
 }
 
+// GetExecutionPayloadBidParentBlockHash returns
+// `signed_execution_payload_bid.message.parent_block_hash` of the beacon block at `slot`,
+// which is the execution block the proposer at that slot built on and therefore the block
+// the slot's light client header references.
+//
+// Gloas onwards only; it fails for earlier forks, which carry the execution payload in the
+// block itself and have no bid.
+func (cl Client) GetExecutionPayloadBidParentBlockHash(ctx context.Context, slot uint64) ([]byte, error) {
+	var res BeaconBlockBidResponse
+	if err := cl.fetcher.Get(ctx, fmt.Sprintf("/eth/v2/beacon/blocks/%v", slot), &res); err != nil {
+		return nil, err
+	}
+	bid := res.Data.Message.Body.SignedExecutionPayloadBid
+	if bid == nil {
+		return nil, fmt.Errorf("block has no execution payload bid: slot=%v version=%v", slot, res.Version)
+	}
+	if len(bid.Message.ParentBlockHash) != 32 {
+		return nil, fmt.Errorf("unexpected parent block hash length: slot=%v length=%v", slot, len(bid.Message.ParentBlockHash))
+	}
+	return bid.Message.ParentBlockHash, nil
+}
+
 func (cl Client) GetFinalityCheckpoints(ctx context.Context) (*StateFinalityCheckpoints, error) {
 	var res StateFinalityCheckpointResponse
 	if err := cl.fetcher.Get(ctx, "/eth/v1/beacon/states/head/finality_checkpoints", &res); err != nil {
