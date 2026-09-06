@@ -16,17 +16,8 @@ use ethereum_light_client_verifier::context::ChainConsensusVerificationContext;
 use ethereum_light_client_verifier::updates::ConsensusUpdate;
 
 /// Difference between block_number gindex and block_hash gindex in ExecutionPayload.
-/// Difference between block_number gindex and block_hash gindex in ExecutionPayload.
 const BLOCK_NUMBER_TO_BLOCK_HASH_DIFF: u32 = 6;
 
-/// Validates the execution update block hash against the finalized execution
-/// root of `consensus_update`.
-///
-/// For pre-Gloas forks the block hash is verified via a Merkle proof against
-/// the execution payload root. For Gloas and later forks the execution root is
-/// the block hash itself, so the update's `block_hash` must simply equal it.
-///
-/// Required for L2 chains like Optimism and Arbitrum; not needed for Ethereum mainnet.
 /// Index of `timestamp` in the RLP-encoded execution block header.
 const RLP_TIMESTAMP_INDEX: usize = 11;
 
