@@ -107,6 +107,8 @@ pub struct ExecutionUpdateInfo {
     pub block_hash: H256,
     /// Branch indicating the block hash in the tree corresponding to the execution payload
     pub block_hash_branch: Vec<H256>,
+    /// RLP-encoded execution block header (for Gloas+)
+    pub rlp: Vec<u8>,
 }
 
 impl ExecutionUpdate for ExecutionUpdateInfo {
@@ -124,6 +126,10 @@ impl ExecutionUpdate for ExecutionUpdateInfo {
 
     fn block_number_branch(&self) -> Vec<H256> {
         self.block_number_branch.clone()
+    }
+
+    fn rlp(&self) -> Vec<u8> {
+        self.rlp.clone()
     }
 }
 
@@ -336,6 +342,7 @@ pub fn convert_proto_to_fork_parameters(
             execution_payload_gindex: spec.execution_payload_gindex,
             execution_payload_state_root_gindex: spec.execution_payload_state_root_gindex,
             execution_payload_block_number_gindex: spec.execution_payload_block_number_gindex,
+            execution_block_hash_gindex: spec.execution_block_hash_gindex,
         })
     }
 
@@ -375,6 +382,7 @@ pub fn convert_proto_to_execution_update(
             "block_hash_branch",
             execution_update.block_hash_branch,
         )?,
+        rlp: execution_update.rlp,
     })
 }
 
@@ -401,6 +409,7 @@ pub fn convert_execution_update_to_proto(
             .into_iter()
             .map(|n| n.as_bytes().to_vec())
             .collect(),
+        rlp: execution_update.rlp,
     }
 }
 
@@ -589,6 +598,7 @@ mod tests {
             block_number_branch: vec![h256_from_byte(4)],
             block_hash: h256_from_byte(5),
             block_hash_branch: vec![h256_from_byte(6), h256_from_byte(7)],
+            rlp: vec![1, 2, 3, 4, 5],
         };
 
         let proto = convert_execution_update_to_proto(original.clone());
@@ -598,6 +608,7 @@ mod tests {
         assert_eq!(original.state_root_branch, converted.state_root_branch);
         assert_eq!(original.block_number, converted.block_number);
         assert_eq!(original.block_number_branch, converted.block_number_branch);
+        assert_eq!(original.rlp, converted.rlp);
         assert_eq!(original.block_hash, converted.block_hash);
         assert_eq!(original.block_hash_branch, converted.block_hash_branch);
     }

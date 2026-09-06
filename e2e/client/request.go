@@ -132,13 +132,16 @@ func encodeRLPProof(proof []string) ([]byte, error) {
 }
 
 // detectNetwork determines the network from the genesis fork version;
-// anything other than mainnet/sepolia is treated as minimal.
+// anything other than mainnet/sepolia/ethpandaops is treated as minimal.
 func detectNetwork(genesisForkVersion [4]byte) string {
 	switch genesisForkVersion {
 	case [4]byte{0x00, 0x00, 0x00, 0x00}:
 		return relay.Mainnet
 	case [4]byte{0x90, 0x00, 0x00, 0x69}:
 		return relay.Sepolia
+	case [4]byte{0x10, 0x00, 0x00, 0x38}:
+		// kurtosis devnet built by ethpandaops/ethereum-package
+		return relay.MinimalEthpandaops
 	default:
 		return relay.Minimal
 	}
@@ -188,6 +191,7 @@ func fetchForkSchedule(ctx context.Context, beaconEndpoint string) (map[string]u
 		relay.Deneb:     "DENEB",
 		relay.Electra:   "ELECTRA",
 		relay.Fulu:      "FULU",
+		relay.Gloas:     "GLOAS",
 	} {
 		e, err := epoch(key)
 		if err != nil {
@@ -235,15 +239,21 @@ func BuildVerifyUpdateRequest(
 		return nil, fmt.Errorf("failed to get light client update for period %d: %w", period, err)
 	}
 
+	executionClient, err := rpc.DialContext(ctx, executionEndpoint)
+	if err != nil {
+		return nil, fmt.Errorf("failed to dial execution endpoint: %w", err)
+	}
+	defer executionClient.Close()
+
 	var consensusUpdate *lctypes.ConsensusUpdate
 	var executionUpdate *lctypes.ExecutionUpdate
 	var headerTimestamp uint64
 	if isNext {
 		consensusUpdate = lcUpdate.Data.ToProto()
-		executionUpdate, headerTimestamp, err = relay.BuildExecutionUpdateFromFinalizedHeader(&lcUpdate.Data.FinalizedHeader, false)
+		executionUpdate, headerTimestamp, err = relay.BuildExecutionUpdateFromFinalizedHeader(ctx, executionClient, &lcUpdate.Data.FinalizedHeader, false)
 	} else {
 		consensusUpdate = finalityUpdate.Data.ToProto()
-		executionUpdate, headerTimestamp, err = relay.BuildExecutionUpdateFromFinalizedHeader(&finalityUpdate.Data.FinalizedHeader, false)
+		executionUpdate, headerTimestamp, err = relay.BuildExecutionUpdateFromFinalizedHeader(ctx, executionClient, &finalityUpdate.Data.FinalizedHeader, false)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to build execution update: %w", err)
@@ -280,11 +290,6 @@ func BuildVerifyUpdateRequest(
 	}
 	trustedTimestamp := genesis.GenesisTimeSeconds + trustedSlot*relay.SecondsPerSlot(network)
 
-	executionClient, err := rpc.DialContext(ctx, executionEndpoint)
-	if err != nil {
-		return nil, fmt.Errorf("failed to dial execution endpoint: %w", err)
-	}
-	defer executionClient.Close()
 	accountUpdate, err := relay.BuildAccountUpdate(ctx, proofClient{executionClient}, ibcAddress, executionUpdate.BlockNumber)
 	if err != nil {
 		return nil, wrapProofErr(fmt.Errorf("failed to build account update: %w", err))
@@ -307,7 +312,7 @@ func BuildVerifyUpdateRequest(
 
 	// the fork schedule is only consulted for the minimal preset
 	var schedule map[string]uint64
-	if network == relay.Minimal {
+	if network == relay.Minimal || network == relay.MinimalEthpandaops {
 		schedule, err = fetchForkSchedule(ctx, beaconEndpoint)
 		if err != nil {
 			return nil, err

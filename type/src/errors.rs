@@ -75,6 +75,8 @@ pub enum Error {
     InvalidBlockHashMerkleBranch {
         error: ethereum_consensus::errors::MerkleError,
     },
+    #[error("unexpected block hash: expected={expected:?} actual={actual:?}")]
+    UnexpectedBlockHash { expected: H256, actual: H256 },
     #[error("invalid current sync committee keys: expected={expected:?} actual={actual:?}")]
     InvalidCurrentSyncCommitteeKeys {
         expected: PublicKey,
@@ -106,6 +108,8 @@ pub enum Error {
     ZeroTimestamp,
     #[error("unexpected header timestamp: expected={expected} actual={actual}")]
     UnexpectedTimestamp { expected: u128, actual: u128 },
+    #[error("invalid execution block header rlp")]
+    InvalidExecutionBlockHeaderRlp,
 
     // ========================================================================
     // Serialization errors
