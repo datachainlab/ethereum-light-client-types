@@ -247,16 +247,21 @@ func BuildVerifyUpdateRequest(
 
 	var consensusUpdate *lctypes.ConsensusUpdate
 	var executionUpdate *lctypes.ExecutionUpdate
-	var headerTimestamp uint64
+	var updateFinalizedHeader *beacon.LightClientHeader
 	if isNext {
 		consensusUpdate = lcUpdate.Data.ToProto()
-		executionUpdate, headerTimestamp, err = relay.BuildExecutionUpdateFromFinalizedHeader(ctx, executionClient, &lcUpdate.Data.FinalizedHeader, false)
+		updateFinalizedHeader = &lcUpdate.Data.FinalizedHeader
 	} else {
 		consensusUpdate = finalityUpdate.Data.ToProto()
-		executionUpdate, headerTimestamp, err = relay.BuildExecutionUpdateFromFinalizedHeader(ctx, executionClient, &finalityUpdate.Data.FinalizedHeader, false)
+		updateFinalizedHeader = &finalityUpdate.Data.FinalizedHeader
 	}
+	executionUpdate, err = relay.BuildExecutionUpdateFromFinalizedHeader(ctx, executionClient, updateFinalizedHeader, false)
 	if err != nil {
 		return nil, fmt.Errorf("failed to build execution update: %w", err)
+	}
+	headerTimestamp, err := relay.ExecutionHeaderTimestamp(updateFinalizedHeader, executionUpdate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get execution header timestamp: %w", err)
 	}
 
 	bootstrapCommittee, err := relay.GetBootstrapInPeriod(ctx, beaconClient, network, period)

@@ -125,11 +125,15 @@ func TestBuildExecutionUpdateFromFinalizedHeader_PreGloas(t *testing.T) {
 	ctx := context.Background()
 	mockClient := &MockRPCClient{}
 
-	update, timestamp, err := BuildExecutionUpdateFromFinalizedHeader(ctx, mockClient, header, false)
+	update, err := BuildExecutionUpdateFromFinalizedHeader(ctx, mockClient, header, false)
 	if err != nil {
 		t.Fatalf("BuildExecutionUpdateFromFinalizedHeader() error = %v", err)
 	}
 
+	timestamp, err := ExecutionHeaderTimestamp(header, update)
+	if err != nil {
+		t.Fatalf("ExecutionHeaderTimestamp() error = %v", err)
+	}
 	if timestamp != header.Execution.Timestamp {
 		t.Errorf("timestamp = %d, want %d", timestamp, header.Execution.Timestamp)
 	}
@@ -175,11 +179,15 @@ func TestBuildExecutionUpdateFromFinalizedHeader_Gloas(t *testing.T) {
 		RawHeader: rlpHeader,
 	}
 
-	update, timestamp, err := BuildExecutionUpdateFromFinalizedHeader(ctx, mockClient, header, false)
+	update, err := BuildExecutionUpdateFromFinalizedHeader(ctx, mockClient, header, false)
 	if err != nil {
 		t.Fatalf("BuildExecutionUpdateFromFinalizedHeader() error = %v", err)
 	}
 
+	timestamp, err := ExecutionHeaderTimestamp(header, update)
+	if err != nil {
+		t.Fatalf("ExecutionHeaderTimestamp() error = %v", err)
+	}
 	if timestamp != gethHeader.Time {
 		t.Errorf("timestamp = %d, want %d", timestamp, gethHeader.Time)
 	}

@@ -59,35 +59,28 @@ const (
 )
 
 // BuildExecutionUpdateFromBlockHash builds ExecutionUpdate using RLP verification (Gloas)
-func BuildExecutionUpdateFromBlockHash(ctx context.Context, executionClient execution.RPCClient, blockHash []byte) (*types.ExecutionUpdate, uint64, error) {
+func BuildExecutionUpdateFromBlockHash(ctx context.Context, executionClient execution.RPCClient, blockHash []byte) (*types.ExecutionUpdate, error) {
 	hash := common.BytesToHash(blockHash)
 
 	// Fetch RLP-encoded header via debug_getRawHeader
 	rlpHeader, err := execution.GetRawHeader(ctx, executionClient, hash)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to get raw header: %w", err)
+		return nil, fmt.Errorf("failed to get raw header: %w", err)
 	}
 
-	// Decode RLP to extract state_root, block_number and timestamp
-	var fields []rlp.RawValue
-	if err := rlp.DecodeBytes(rlpHeader, &fields); err != nil {
-		return nil, 0, fmt.Errorf("failed to decode RLP header: %w", err)
-	}
-	if len(fields) < execHeaderMinFields {
-		return nil, 0, fmt.Errorf("unexpected RLP header: got %d fields, want at least %d", len(fields), execHeaderMinFields)
+	// Decode RLP to extract state_root and block_number
+	fields, err := decodeExecutionHeaderFields(rlpHeader)
+	if err != nil {
+		return nil, err
 	}
 
 	var stateRoot common.Hash
 	if err := rlp.DecodeBytes(fields[execHeaderStateRootIndex], &stateRoot); err != nil {
-		return nil, 0, fmt.Errorf("failed to decode state root: %w", err)
+		return nil, fmt.Errorf("failed to decode state root: %w", err)
 	}
 	var blockNumber uint64
 	if err := rlp.DecodeBytes(fields[execHeaderBlockNumberIndex], &blockNumber); err != nil {
-		return nil, 0, fmt.Errorf("failed to decode block number: %w", err)
-	}
-	var timestamp uint64
-	if err := rlp.DecodeBytes(fields[execHeaderTimestampIndex], &timestamp); err != nil {
-		return nil, 0, fmt.Errorf("failed to decode timestamp: %w", err)
+		return nil, fmt.Errorf("failed to decode block number: %w", err)
 	}
 
 	// For Gloas, we use RLP verification instead of SSZ merkle proofs
@@ -99,20 +92,51 @@ func BuildExecutionUpdateFromBlockHash(ctx context.Context, executionClient exec
 		// For Gloas the execution root is the block hash itself; the verifier
 		// checks that this equals the consensus update's finalized execution root.
 		BlockHash: hash.Bytes(),
-	}, timestamp, nil
+	}, nil
 }
 
 // BuildExecutionUpdateFromFinalizedHeader builds ExecutionUpdate from finalized header.
 // Handles both Gloas (RLP-based) and pre-Gloas (SSZ merkle proof) cases.
 // If includeBlockHashPreGloas is true, it also includes BlockHash and BlockHashBranch for pre-Gloas (required for optimism).
-func BuildExecutionUpdateFromFinalizedHeader(ctx context.Context, executionClient execution.RPCClient, finalizedHeader *beacon.LightClientHeader, includeBlockHashPreGloas bool) (*types.ExecutionUpdate, uint64, error) {
+func BuildExecutionUpdateFromFinalizedHeader(ctx context.Context, executionClient execution.RPCClient, finalizedHeader *beacon.LightClientHeader, includeBlockHashPreGloas bool) (*types.ExecutionUpdate, error) {
 	if finalizedHeader.IsGloas() {
 		return BuildExecutionUpdateFromBlockHash(ctx, executionClient, finalizedHeader.ExecutionBlockHash)
 	}
-	executionHeader := finalizedHeader.Execution
-	executionUpdate, err := BuildExecutionUpdate(executionHeader, includeBlockHashPreGloas)
-	if err != nil {
-		return nil, 0, err
+	return BuildExecutionUpdate(finalizedHeader.Execution, includeBlockHashPreGloas)
+}
+
+// ExecutionHeaderTimestamp returns the timestamp, in unix seconds, of the execution block
+// that `executionUpdate` describes.
+//
+// This mirrors `ExecutionUpdateInfo::timestamp` on the verifier side, which derives the same
+// value rather than accepting one from a relayer. A prover recording an initial consensus
+// state must use this, so that the timestamp it stores is the one the light client will
+// derive when it applies the next update.
+//
+// Neither branch performs a request: pre-Gloas the value is in the light client header, and
+// post-Gloas it is in the RLP that `executionUpdate` already carries.
+func ExecutionHeaderTimestamp(finalizedHeader *beacon.LightClientHeader, executionUpdate *types.ExecutionUpdate) (uint64, error) {
+	if !finalizedHeader.IsGloas() {
+		return finalizedHeader.Execution.Timestamp, nil
 	}
-	return executionUpdate, executionHeader.Timestamp, nil
+	fields, err := decodeExecutionHeaderFields(executionUpdate.Rlp)
+	if err != nil {
+		return 0, err
+	}
+	var timestamp uint64
+	if err := rlp.DecodeBytes(fields[execHeaderTimestampIndex], &timestamp); err != nil {
+		return 0, fmt.Errorf("failed to decode timestamp: %w", err)
+	}
+	return timestamp, nil
+}
+
+func decodeExecutionHeaderFields(rlpHeader []byte) ([]rlp.RawValue, error) {
+	var fields []rlp.RawValue
+	if err := rlp.DecodeBytes(rlpHeader, &fields); err != nil {
+		return nil, fmt.Errorf("failed to decode RLP header: %w", err)
+	}
+	if len(fields) < execHeaderMinFields {
+		return nil, fmt.Errorf("unexpected RLP header: got %d fields, want at least %d", len(fields), execHeaderMinFields)
+	}
+	return fields, nil
 }
