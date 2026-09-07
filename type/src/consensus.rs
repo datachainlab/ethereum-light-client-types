@@ -1035,19 +1035,15 @@ mod tests {
         stream.out().to_vec()
     }
 
-    fn gloas_spec() -> ethereum_consensus::fork::ForkSpec {
-        let mut spec = DENEB_FORK_SPEC;
-        spec.execution_block_hash_gindex = 2856;
-        spec
-    }
-
     #[test]
     fn pre_gloas_timestamp_comes_from_the_finalized_slot() {
         let ctx = make_context(DENEB_FORK_SPEC);
         let slot = Slot::from(10u64);
         // the RLP must be ignored on this branch, so give it a value that would stand out
-        let mut execution_update = ExecutionUpdateInfo::default();
-        execution_update.rlp = rlp_header_with_timestamp(1788508911);
+        let execution_update = ExecutionUpdateInfo {
+            rlp: rlp_header_with_timestamp(1788508911),
+            ..Default::default()
+        };
 
         let timestamp = execution_update.timestamp(&ctx, slot).unwrap();
         assert_eq!(
@@ -1060,8 +1056,10 @@ mod tests {
     fn gloas_timestamp_comes_from_the_rlp_header() {
         let ctx = gloas_context();
         let slot = Slot::from(10u64);
-        let mut execution_update = ExecutionUpdateInfo::default();
-        execution_update.rlp = rlp_header_with_timestamp(1788508911);
+        let execution_update = ExecutionUpdateInfo {
+            rlp: rlp_header_with_timestamp(1788508911),
+            ..Default::default()
+        };
 
         let timestamp = execution_update.timestamp(&ctx, slot).unwrap();
         assert_eq!(timestamp, secs_to_nanos(1788508911));
@@ -1079,8 +1077,10 @@ mod tests {
         for _ in 0..5 {
             stream.append(&0u64);
         }
-        let mut execution_update = ExecutionUpdateInfo::default();
-        execution_update.rlp = stream.out().to_vec();
+        let execution_update = ExecutionUpdateInfo {
+            rlp: stream.out().to_vec(),
+            ..Default::default()
+        };
 
         assert!(matches!(
             execution_update.timestamp(&ctx, Slot::from(10u64)),
@@ -1091,8 +1091,10 @@ mod tests {
     #[test]
     fn gloas_rejects_a_zero_timestamp() {
         let ctx = gloas_context();
-        let mut execution_update = ExecutionUpdateInfo::default();
-        execution_update.rlp = rlp_header_with_timestamp(0);
+        let execution_update = ExecutionUpdateInfo {
+            rlp: rlp_header_with_timestamp(0),
+            ..Default::default()
+        };
 
         assert!(matches!(
             execution_update.timestamp(&ctx, Slot::from(10u64)),

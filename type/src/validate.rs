@@ -75,33 +75,10 @@ mod tests {
     use crate::consensus::ConsensusUpdateInfo;
     use alloc::vec;
     use ethereum_consensus::beacon::Version;
-    use ethereum_consensus::config;
-    use ethereum_consensus::context::DefaultChainContext;
-    use ethereum_consensus::fork::altair::ALTAIR_FORK_SPEC;
     use ethereum_consensus::fork::deneb::DENEB_FORK_SPEC;
     use ethereum_consensus::fork::{ForkParameter, ForkParameters};
-    use ethereum_consensus::preset;
     use ethereum_consensus::types::U64;
     use ethereum_light_client_verifier::context::{Fraction, LightClientContext};
-
-    fn test_context() -> DefaultChainContext {
-        // genesis_slot = 0, seconds_per_slot = 6 (minimal preset),
-        // genesis_time = min_genesis_time => timestamp(slot) = 1578009600 + slot * 6
-        let cfg = config::Config {
-            preset: preset::minimal::PRESET,
-            fork_parameters: ForkParameters::new(
-                ethereum_consensus::beacon::Version([0, 0, 0, 1]),
-                vec![ForkParameter::new(
-                    ethereum_consensus::beacon::Version([1, 0, 0, 1]),
-                    U64(0),
-                    ALTAIR_FORK_SPEC,
-                )],
-            )
-            .unwrap(),
-            min_genesis_time: U64(1578009600),
-        };
-        DefaultChainContext::new_with_config(U64(1729846322), cfg)
-    }
 
     fn h256_from_byte(byte: u8) -> H256 {
         H256::from_slice(&[byte; 32])
