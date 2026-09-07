@@ -10,6 +10,10 @@ const (
 	Mainnet = "mainnet"
 	Minimal = "minimal"
 	Sepolia = "sepolia"
+	// MinimalEthpandaops is the minimal preset as produced by
+	// ethpandaops/ethereum-package (kurtosis devnets). It is identical to Minimal
+	// except for the fork versions, which the package hardcodes to its own scheme.
+	MinimalEthpandaops = "minimal-ethpandaops"
 )
 
 const (
@@ -24,6 +28,7 @@ const (
 	Deneb     = "deneb"
 	Electra   = "electra"
 	Fulu      = "fulu"
+	Gloas     = "gloas"
 )
 
 var (
@@ -58,6 +63,21 @@ var (
 		ExecutionPayloadBlockNumberGindex: DenebSpec.ExecutionPayloadBlockNumberGindex,
 	}
 	FuluSpec = ElectraSpec
+	// GloasSpec: Uses execution_block_hash instead of ExecutionPayloadHeader.
+	// EIP-7688 turns BeaconState into a progressive container, so the state gindices
+	// are not inherited from Electra; EIP-7732 moves the execution commitment into
+	// signed_execution_payload_bid, which gives a new block body gindex.
+	// ref: https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/light-client/sync-protocol.md#new-constants
+	GloasSpec = types.ForkSpec{
+		FinalizedRootGindex:        735,  // FINALIZED_ROOT_GINDEX_GLOAS
+		CurrentSyncCommitteeGindex: 2945, // CURRENT_SYNC_COMMITTEE_GINDEX_GLOAS
+		NextSyncCommitteeGindex:    2946, // NEXT_SYNC_COMMITTEE_GINDEX_GLOAS
+		ExecutionPayloadGindex:     0,    // Not used in Gloas
+		// Not used in Gloas (RLP verification instead of SSZ merkle proofs)
+		ExecutionPayloadStateRootGindex:   0,
+		ExecutionPayloadBlockNumberGindex: 0,
+		ExecutionBlockHashGindex:          2856, // EXECUTION_BLOCK_HASH_GINDEX_GLOAS
+	}
 )
 
 const (
@@ -89,7 +109,7 @@ func IsMainnetPreset(network string) bool {
 	switch network {
 	case Mainnet, Sepolia:
 		return true
-	case Minimal:
+	case Minimal, MinimalEthpandaops:
 		return false
 	default:
 		panic(fmt.Sprintf("unknown network: %v", network))
@@ -120,8 +140,88 @@ func EpochsPerSyncCommitteePeriod(network string) uint64 {
 	}
 }
 
+// convertToEthpandaopsForkVersions converts standard minimal fork versions to the
+// ethpandaops/ethereum-package scheme.
+// Ethpandaops reserves 0x10 for the genesis version and bumps each subsequent fork by 0x10,
+// so the standard-minimal fork ordinal n (Altair=1 .. Gloas=7) maps to (n+1)*0x10.
+// Standard minimal: GenesisForkVersion={0,0,0,1}, Fork.Version={n,0,0,1}
+// Ethpandaops:      GenesisForkVersion={0x10,0,0,0x38}, Fork.Version={(n+1)*0x10,0,0,0x38}
+// (genesis=0x10, Altair=0x20, Bellatrix=0x30, Capella=0x40, Deneb=0x50, Electra=0x60,
+// Fulu=0x70, Gloas=0x80)
+// ref: https://github.com/ethpandaops/ethereum-package/blob/main/src/package_io/constants.star
+func convertToEthpandaopsForkVersions(params *types.ForkParameters) *types.ForkParameters {
+	newGenesis := make([]byte, 4)
+	copy(newGenesis, params.GenesisForkVersion)
+	newGenesis[0] = 0x10
+	newGenesis[3] = 0x38
+
+	newForks := make([]*types.Fork, len(params.Forks))
+	for i, fork := range params.Forks {
+		newVersion := make([]byte, 4)
+		copy(newVersion, fork.Version)
+		newVersion[0] = (fork.Version[0] + 1) * 0x10
+		newVersion[3] = 0x38
+
+		newForks[i] = &types.Fork{
+			Version: newVersion,
+			Epoch:   fork.Epoch,
+			Spec:    fork.Spec,
+		}
+	}
+
+	return &types.ForkParameters{
+		GenesisForkVersion: newGenesis,
+		Forks:              newForks,
+	}
+}
+
 func GetForkParameters(network string, minimalForkSchedule map[string]uint64) *types.ForkParameters {
 	switch network {
+	case Minimal, MinimalEthpandaops:
+		minimalParams := &types.ForkParameters{
+			GenesisForkVersion: []byte{0, 0, 0, 1},
+			Forks: []*types.Fork{
+				{
+					Version: []byte{1, 0, 0, 1},
+					Epoch:   minimalForkSchedule[Altair],
+					Spec:    &AltairSpec,
+				},
+				{
+					Version: []byte{2, 0, 0, 1},
+					Epoch:   minimalForkSchedule[Bellatrix],
+					Spec:    &BellatrixSpec,
+				},
+				{
+					Version: []byte{3, 0, 0, 1},
+					Epoch:   minimalForkSchedule[Capella],
+					Spec:    &CapellaSpec,
+				},
+				{
+					Version: []byte{4, 0, 0, 1},
+					Epoch:   minimalForkSchedule[Deneb],
+					Spec:    &DenebSpec,
+				},
+				{
+					Version: []byte{5, 0, 0, 1},
+					Epoch:   minimalForkSchedule[Electra],
+					Spec:    &ElectraSpec,
+				},
+				{
+					Version: []byte{6, 0, 0, 1},
+					Epoch:   minimalForkSchedule[Fulu],
+					Spec:    &FuluSpec,
+				},
+				{
+					Version: []byte{7, 0, 0, 1},
+					Epoch:   minimalForkSchedule[Gloas],
+					Spec:    &GloasSpec,
+				},
+			},
+		}
+		if network == MinimalEthpandaops {
+			return convertToEthpandaopsForkVersions(minimalParams)
+		}
+		return minimalParams
 	case Mainnet:
 		return &types.ForkParameters{
 			GenesisForkVersion: []byte{0, 0, 0, 0},
@@ -157,41 +257,11 @@ func GetForkParameters(network string, minimalForkSchedule map[string]uint64) *t
 					Epoch:   411392,
 					Spec:    &FuluSpec,
 				},
-			},
-		}
-	case Minimal:
-		return &types.ForkParameters{
-			GenesisForkVersion: []byte{0, 0, 0, 1},
-			Forks: []*types.Fork{
+				// Gloas fork epoch is TBD
 				{
-					Version: []byte{1, 0, 0, 1},
-					Epoch:   minimalForkSchedule[Altair],
-					Spec:    &AltairSpec,
-				},
-				{
-					Version: []byte{2, 0, 0, 1},
-					Epoch:   minimalForkSchedule[Bellatrix],
-					Spec:    &BellatrixSpec,
-				},
-				{
-					Version: []byte{3, 0, 0, 1},
-					Epoch:   minimalForkSchedule[Capella],
-					Spec:    &CapellaSpec,
-				},
-				{
-					Version: []byte{4, 0, 0, 1},
-					Epoch:   minimalForkSchedule[Deneb],
-					Spec:    &DenebSpec,
-				},
-				{
-					Version: []byte{5, 0, 0, 1},
-					Epoch:   minimalForkSchedule[Electra],
-					Spec:    &ElectraSpec,
-				},
-				{
-					Version: []byte{6, 0, 0, 1},
-					Epoch:   minimalForkSchedule[Fulu],
-					Spec:    &FuluSpec,
+					Version: []byte{7, 0, 0, 0},
+					Epoch:   18446744073709551615, // TBD: set to max uint64 until confirmed
+					Spec:    &GloasSpec,
 				},
 			},
 		}
@@ -229,6 +299,12 @@ func GetForkParameters(network string, minimalForkSchedule map[string]uint64) *t
 					Version: []byte{144, 0, 0, 117},
 					Epoch:   272640,
 					Spec:    &FuluSpec,
+				},
+				// Gloas Sepolia fork epoch is TBD
+				{
+					Version: []byte{144, 0, 0, 118},
+					Epoch:   18446744073709551615, // TBD: set to max uint64 until confirmed
+					Spec:    &GloasSpec,
 				},
 			},
 		}

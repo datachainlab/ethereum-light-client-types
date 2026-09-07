@@ -7,11 +7,13 @@
 use crate::commitment::decode_eip1184_rlp_proof;
 use crate::errors::Error;
 use crate::height::Height;
+use crate::time::secs_to_nanos;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 use ethereum_consensus::beacon::{BeaconBlockHeader, Slot, Version};
 use ethereum_consensus::bls::{PublicKey, Signature};
+use ethereum_consensus::compute::compute_timestamp_at_slot;
 use ethereum_consensus::fork::{ForkParameter, ForkParameters, ForkSpec};
 use ethereum_consensus::sync_protocol::{SyncAggregate, SyncCommittee};
 use ethereum_consensus::types::{H256, U64};
@@ -22,6 +24,7 @@ use ethereum_light_client_proto::ibc::lightclients::ethereum::v1::{
     SyncAggregate as ProtoSyncAggregate, SyncCommittee as ProtoSyncCommittee,
     TrustedSyncCommittee as ProtoTrustedSyncCommittee,
 };
+use ethereum_light_client_verifier::context::ChainConsensusVerificationContext;
 use ethereum_light_client_verifier::updates::{ConsensusUpdate, ExecutionUpdate};
 use ssz_rs::{Bitvector, Deserialize, Vector};
 
@@ -89,6 +92,9 @@ impl<const SYNC_COMMITTEE_SIZE: usize> ConsensusUpdate<SYNC_COMMITTEE_SIZE>
     }
 }
 
+/// Index of `timestamp` in the RLP-encoded execution block header.
+const RLP_TIMESTAMP_INDEX: usize = 11;
+
 /// Information for an execution layer update.
 ///
 /// This struct contains the execution layer state root and block number
@@ -107,6 +113,56 @@ pub struct ExecutionUpdateInfo {
     pub block_hash: H256,
     /// Branch indicating the block hash in the tree corresponding to the execution payload
     pub block_hash_branch: Vec<H256>,
+    /// RLP-encoded execution block header (for Gloas+)
+    pub rlp: Vec<u8>,
+}
+
+impl ExecutionUpdateInfo {
+    /// Timestamp of the execution block this update describes, in unix nanoseconds, using the
+    /// rule that applies to the fork at `finalized_slot`.
+    ///
+    /// The timestamp is derived rather than supplied, so it is never an input a relayer
+    /// controls. Both sources are already authenticated by the consensus update:
+    ///
+    /// - pre-Gloas: the finalized beacon block carries the execution payload of its own slot,
+    ///   so the timestamp is `compute_timestamp_at_slot(finalized_slot)`, and `finalized_slot`
+    ///   comes from the sync-committee-verified finalized header
+    /// - Gloas: this update describes the block that the bid's `parent_block_hash` points at,
+    ///   whose timestamp is neither `compute_timestamp_at_slot(finalized_slot)` nor derivable
+    ///   from the slot, since slots may be skipped. It is read from the RLP header instead,
+    ///   which the consensus verifier pins via `keccak256(rlp) == execution_block_hash` — the
+    ///   same binding that already covers `state_root` and `block_number`.
+    ///
+    /// Only call this once the update itself has been verified: the Gloas branch reads the RLP,
+    /// and that is the step which binds it to the consensus update.
+    pub fn timestamp<C: ChainConsensusVerificationContext>(
+        &self,
+        ctx: &C,
+        finalized_slot: Slot,
+    ) -> Result<u128, Error> {
+        let timestamp_secs = if ctx.compute_fork_spec(finalized_slot).is_gloas() {
+            self.decode_timestamp_from_rlp()?
+        } else {
+            compute_timestamp_at_slot(ctx, finalized_slot).0
+        };
+        if timestamp_secs == 0 {
+            return Err(Error::ZeroTimestamp);
+        }
+        Ok(secs_to_nanos(timestamp_secs))
+    }
+
+    /// Reads `timestamp` out of the RLP-encoded execution block header, in unix seconds.
+    fn decode_timestamp_from_rlp(&self) -> Result<u64, Error> {
+        let rlp = rlp::Rlp::new(&self.rlp);
+        let count = rlp
+            .item_count()
+            .map_err(|_| Error::InvalidExecutionBlockHeaderRlp)?;
+        if count <= RLP_TIMESTAMP_INDEX {
+            return Err(Error::InvalidExecutionBlockHeaderRlp);
+        }
+        rlp.val_at(RLP_TIMESTAMP_INDEX)
+            .map_err(|_| Error::InvalidExecutionBlockHeaderRlp)
+    }
 }
 
 impl ExecutionUpdate for ExecutionUpdateInfo {
@@ -124,6 +180,10 @@ impl ExecutionUpdate for ExecutionUpdateInfo {
 
     fn block_number_branch(&self) -> Vec<H256> {
         self.block_number_branch.clone()
+    }
+
+    fn rlp(&self) -> Vec<u8> {
+        self.rlp.clone()
     }
 }
 
@@ -336,6 +396,7 @@ pub fn convert_proto_to_fork_parameters(
             execution_payload_gindex: spec.execution_payload_gindex,
             execution_payload_state_root_gindex: spec.execution_payload_state_root_gindex,
             execution_payload_block_number_gindex: spec.execution_payload_block_number_gindex,
+            execution_block_hash_gindex: spec.execution_block_hash_gindex,
         })
     }
 
@@ -375,6 +436,7 @@ pub fn convert_proto_to_execution_update(
             "block_hash_branch",
             execution_update.block_hash_branch,
         )?,
+        rlp: execution_update.rlp,
     })
 }
 
@@ -401,6 +463,7 @@ pub fn convert_execution_update_to_proto(
             .into_iter()
             .map(|n| n.as_bytes().to_vec())
             .collect(),
+        rlp: execution_update.rlp,
     }
 }
 
@@ -570,10 +633,40 @@ pub(crate) fn decode_branch(bz: Vec<Vec<u8>>) -> Result<Vec<H256>, Error> {
 mod tests {
     use super::*;
     use alloc::vec;
+    use ethereum_consensus::fork::deneb::DENEB_FORK_SPEC;
     use ethereum_light_client_proto::ibc::core::client::v1::Height as ProtoHeight;
+    use ethereum_light_client_verifier::context::{Fraction, LightClientContext};
 
     // Common test constants
     const TEST_SYNC_COMMITTEE_SIZE: usize = 32;
+
+    fn gloas_context() -> LightClientContext {
+        let mut spec = DENEB_FORK_SPEC;
+        spec.execution_block_hash_gindex = 2856;
+        make_context(spec)
+    }
+
+    fn make_context(spec: ethereum_consensus::fork::ForkSpec) -> LightClientContext {
+        LightClientContext::new(
+            ForkParameters::new(
+                Version([0, 0, 0, 1]),
+                vec![ForkParameter::new(
+                    Version([1, 0, 0, 1]),
+                    U64::from(0),
+                    spec,
+                )],
+            )
+            .unwrap(),
+            U64::from(6),
+            U64::from(8),
+            U64::from(8),
+            U64::from(0),
+            Default::default(),
+            1,
+            Fraction::new(2, 3).unwrap(),
+            U64::from(0),
+        )
+    }
 
     // Helper function to create H256 from a single byte value
     fn h256_from_byte(byte: u8) -> H256 {
@@ -589,6 +682,7 @@ mod tests {
             block_number_branch: vec![h256_from_byte(4)],
             block_hash: h256_from_byte(5),
             block_hash_branch: vec![h256_from_byte(6), h256_from_byte(7)],
+            rlp: vec![1, 2, 3, 4, 5],
         };
 
         let proto = convert_execution_update_to_proto(original.clone());
@@ -598,6 +692,7 @@ mod tests {
         assert_eq!(original.state_root_branch, converted.state_root_branch);
         assert_eq!(original.block_number, converted.block_number);
         assert_eq!(original.block_number_branch, converted.block_number_branch);
+        assert_eq!(original.rlp, converted.rlp);
         assert_eq!(original.block_hash, converted.block_hash);
         assert_eq!(original.block_hash_branch, converted.block_hash_branch);
     }
@@ -929,5 +1024,81 @@ mod tests {
 
         let result = convert_proto_to_consensus_update::<TEST_SYNC_COMMITTEE_SIZE>(proto);
         assert!(result.is_err());
+    }
+    /// Builds a minimal RLP list whose item at index 11 is `timestamp`.
+    fn rlp_header_with_timestamp(timestamp: u64) -> Vec<u8> {
+        let mut stream = rlp::RlpStream::new_list(12);
+        for _ in 0..11 {
+            stream.append(&0u64);
+        }
+        stream.append(&timestamp);
+        stream.out().to_vec()
+    }
+
+    #[test]
+    fn pre_gloas_timestamp_comes_from_the_finalized_slot() {
+        let ctx = make_context(DENEB_FORK_SPEC);
+        let slot = Slot::from(10u64);
+        // the RLP must be ignored on this branch, so give it a value that would stand out
+        let execution_update = ExecutionUpdateInfo {
+            rlp: rlp_header_with_timestamp(1788508911),
+            ..Default::default()
+        };
+
+        let timestamp = execution_update.timestamp(&ctx, slot).unwrap();
+        assert_eq!(
+            timestamp,
+            secs_to_nanos(compute_timestamp_at_slot(&ctx, slot).0)
+        );
+    }
+
+    #[test]
+    fn gloas_timestamp_comes_from_the_rlp_header() {
+        let ctx = gloas_context();
+        let slot = Slot::from(10u64);
+        let execution_update = ExecutionUpdateInfo {
+            rlp: rlp_header_with_timestamp(1788508911),
+            ..Default::default()
+        };
+
+        let timestamp = execution_update.timestamp(&ctx, slot).unwrap();
+        assert_eq!(timestamp, secs_to_nanos(1788508911));
+        // post-Gloas the block is the bid's parent, so the slot-derived value must not be used
+        assert_ne!(
+            timestamp,
+            secs_to_nanos(compute_timestamp_at_slot(&ctx, slot).0)
+        );
+    }
+
+    #[test]
+    fn gloas_rejects_an_rlp_header_without_a_timestamp_field() {
+        let ctx = gloas_context();
+        let mut stream = rlp::RlpStream::new_list(5);
+        for _ in 0..5 {
+            stream.append(&0u64);
+        }
+        let execution_update = ExecutionUpdateInfo {
+            rlp: stream.out().to_vec(),
+            ..Default::default()
+        };
+
+        assert!(matches!(
+            execution_update.timestamp(&ctx, Slot::from(10u64)),
+            Err(Error::InvalidExecutionBlockHeaderRlp)
+        ));
+    }
+
+    #[test]
+    fn gloas_rejects_a_zero_timestamp() {
+        let ctx = gloas_context();
+        let execution_update = ExecutionUpdateInfo {
+            rlp: rlp_header_with_timestamp(0),
+            ..Default::default()
+        };
+
+        assert!(matches!(
+            execution_update.timestamp(&ctx, Slot::from(10u64)),
+            Err(Error::ZeroTimestamp)
+        ));
     }
 }

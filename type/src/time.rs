@@ -9,9 +9,6 @@
 
 use crate::errors::Error;
 use core::time::Duration;
-use ethereum_consensus::beacon::Slot;
-use ethereum_consensus::compute::compute_timestamp_at_slot;
-use ethereum_consensus::context::ChainContext;
 
 /// Validates that the trusted consensus state is still within the trusting period.
 pub fn validate_state_timestamp_within_trusting_period(
@@ -52,26 +49,6 @@ pub fn validate_header_timestamp_not_future(
     Ok(())
 }
 
-/// Validates that the header timestamp is non-zero and equals
-/// `compute_timestamp_at_slot(finalized_slot)`.
-pub fn validate_header_timestamp<C: ChainContext>(
-    ctx: &C,
-    finalized_slot: Slot,
-    header_timestamp_nanos: u128,
-) -> Result<(), Error> {
-    if header_timestamp_nanos == 0 {
-        return Err(Error::ZeroTimestamp);
-    }
-    let expected = secs_to_nanos(compute_timestamp_at_slot(ctx, finalized_slot).0);
-    if header_timestamp_nanos != expected {
-        return Err(Error::UnexpectedTimestamp {
-            expected,
-            actual: header_timestamp_nanos,
-        });
-    }
-    Ok(())
-}
-
 /// Converts a Unix timestamp in seconds to nanoseconds.
 pub const fn secs_to_nanos(secs: u64) -> u128 {
     secs as u128 * 1_000_000_000
@@ -80,62 +57,6 @@ pub const fn secs_to_nanos(secs: u64) -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::vec;
-    use ethereum_consensus::config;
-    use ethereum_consensus::context::DefaultChainContext;
-    use ethereum_consensus::fork::{altair::ALTAIR_FORK_SPEC, ForkParameter, ForkParameters};
-    use ethereum_consensus::preset;
-    use ethereum_consensus::types::U64;
-
-    fn test_context() -> DefaultChainContext {
-        // genesis_slot = 0, seconds_per_slot = 6 (minimal preset),
-        // genesis_time = min_genesis_time => timestamp(slot) = 1578009600 + slot * 6
-        let cfg = config::Config {
-            preset: preset::minimal::PRESET,
-            fork_parameters: ForkParameters::new(
-                ethereum_consensus::beacon::Version([0, 0, 0, 1]),
-                vec![ForkParameter::new(
-                    ethereum_consensus::beacon::Version([1, 0, 0, 1]),
-                    U64(0),
-                    ALTAIR_FORK_SPEC,
-                )],
-            )
-            .unwrap(),
-            min_genesis_time: U64(1578009600),
-        };
-        DefaultChainContext::new_with_config(U64(1729846322), cfg)
-    }
-
-    #[test]
-    fn test_validate_header_timestamp_success() {
-        let ctx = test_context();
-        let slot = Slot::from(10u64);
-        let expected_secs = compute_timestamp_at_slot(&ctx, slot).0;
-        let header_timestamp = secs_to_nanos(expected_secs);
-        assert!(validate_header_timestamp(&ctx, slot, header_timestamp).is_ok());
-    }
-
-    #[test]
-    fn test_validate_header_timestamp_zero() {
-        let ctx = test_context();
-        assert!(matches!(
-            validate_header_timestamp(&ctx, Slot::from(10u64), 0),
-            Err(Error::ZeroTimestamp)
-        ));
-    }
-
-    #[test]
-    fn test_validate_header_timestamp_mismatch() {
-        let ctx = test_context();
-        let slot = Slot::from(10u64);
-        // off by one second from the slot-derived timestamp
-        let expected_secs = compute_timestamp_at_slot(&ctx, slot).0;
-        let header_timestamp = secs_to_nanos(expected_secs + 1);
-        assert!(matches!(
-            validate_header_timestamp(&ctx, slot, header_timestamp),
-            Err(Error::UnexpectedTimestamp { .. })
-        ));
-    }
 
     #[test]
     fn test_secs_to_nanos() {
