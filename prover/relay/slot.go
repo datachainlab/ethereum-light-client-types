@@ -26,29 +26,17 @@ func GetSlotAtTimestamp(ctx context.Context, beaconClient beacon.Client, network
 	return GENESIS_SLOT + slotsSinceGenesis, nil
 }
 
-// maxSkippedSlotsLookahead bounds the search for the slot that references a given
-// execution block. A gap this long means the chain is not finalizing, in which case
-// there is nothing sensible to return anyway.
 const maxSkippedSlotsLookahead = 64
 
-// GetConsensusStateSlotWithBlockNumber returns the beacon slot that a consensus state
-// created for `blockNumber` records, i.e. the slot of the finalized header whose light
-// client header references that execution block.
+// GetConsensusStateSlotWithBlockNumber returns the slot of the finalized header whose light
+// client header references the execution block `blockNumber`.
 //
-//   - pre-Gloas: the finalized beacon block carries the execution payload of its own slot,
-//     so the slot derived from the execution block timestamp is already the answer.
+//   - pre-Gloas: the beacon block carries the execution payload of its own slot, so the slot
+//     derived from the execution block timestamp is the answer.
 //   - Gloas: the light client header exposes
-//     `signed_execution_payload_bid.message.parent_block_hash`, so it references the block
-//     produced at an *earlier* slot. The recorded slot is the first slot whose proposer
-//     bid on this block, which is not necessarily `slot+1` because slots may be skipped.
-//
-// The Gloas branch matches the bid against the block hash instead of just taking the next
-// slot that has a block. Assuming the two coincide is right on a healthy chain but silently
-// returns a wrong slot when they diverge; matching turns that into an explicit error.
-//
-// Deriving the period from the execution block's own slot instead would be one period off
-// whenever the finalized slot is the first slot of a period, which makes the prover send
-// the previous period's sync committee.
+//     `signed_execution_payload_bid.message.parent_block_hash`, so the referencing slot is a
+//     later one. It is found by matching the bid, not by taking the next slot that has a
+//     block, since slots may be skipped.
 func GetConsensusStateSlotWithBlockNumber(ctx context.Context, beaconClient beacon.Client, executionClient execution.RPCClient, network string, forkParameters *types.ForkParameters, blockNumber uint64) (uint64, error) {
 	block, err := execution.GetBlockHeaderFields(ctx, executionClient, blockNumber)
 	if err != nil {
@@ -62,9 +50,8 @@ func GetConsensusStateSlotWithBlockNumber(ctx context.Context, beaconClient beac
 		return slot, nil
 	}
 	for next := slot + 1; next <= slot+maxSkippedSlotsLookahead; next++ {
-		// An error here means the slot has no block, so keep looking. A block whose bid
-		// names a different parent belongs to a chain segment that does not build on this
-		// block yet, so it is skipped for the same reason.
+		// Any failure is treated as "not this slot": a missing block, and also a
+		// transport error, which may skip past the slot we are looking for.
 		parentBlockHash, err := beaconClient.GetExecutionPayloadBidParentBlockHash(ctx, next)
 		if err == nil && bytes.Equal(parentBlockHash, block.Hash.Bytes()) {
 			return next, nil

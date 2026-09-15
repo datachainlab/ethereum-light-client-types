@@ -27,10 +27,9 @@ type BlockRootResponse struct {
 	ExecutionOptimistic bool `json:"execution_optimistic"`
 }
 
-// BeaconBlockBidResponse decodes only the execution payload bid out of a beacon block.
-// A full block is large and nothing else in it is needed, so the remaining fields are
-// deliberately left undecoded. `signed_execution_payload_bid` exists from Gloas onwards
-// (EIP-7732) and is absent for earlier forks.
+// BeaconBlockBidResponse decodes only the execution payload bid out of a full beacon block
+// response. `signed_execution_payload_bid` exists from Gloas onwards (EIP-7732) and is
+// absent for earlier forks.
 type BeaconBlockBidResponse struct {
 	Version string `json:"version"`
 	Data    struct {
@@ -53,12 +52,13 @@ type LightClientHeader struct {
 	ExecutionBranch    []hexutil.Bytes
 }
 
-// IsGloas returns true if this header is from Gloas fork or later
+// IsGloas reports whether this header is from Gloas or later, which dropped `execution`
+// in favour of `execution_block_hash`.
 func (h *LightClientHeader) IsGloas() bool {
 	return h.Execution == nil
 }
 
-// GetExecutionRoot returns the execution root (HashTreeRoot for pre-Gloas, BlockHash for Gloas)
+// GetExecutionRoot returns the execution root: HashTreeRoot for pre-Gloas, block hash for Gloas.
 func (h *LightClientHeader) GetExecutionRoot() []byte {
 	if h.IsGloas() {
 		return h.ExecutionBlockHash

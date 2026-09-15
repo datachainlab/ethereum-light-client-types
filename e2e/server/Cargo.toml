@@ -15,8 +15,8 @@ prost = "0.11"
 
 ethereum-light-client-types = { path = "../../type" }
 ethereum-light-client-proto = { path = "../../proto" }
-ethereum-consensus = { git = "https://github.com/yoshidan/ethereum-light-client-rs", rev = "cb4f62bb86a143556068c0be89bf62ac5f54c75a" }
-ethereum-light-client-verifier = { git = "https://github.com/yoshidan/ethereum-light-client-rs", rev = "cb4f62bb86a143556068c0be89bf62ac5f54c75a" }
+ethereum-consensus = { git = "https://github.com/yoshidan/ethereum-light-client-rs", rev = "fd7fe9ac107ef182b5b6e6600be54f794a247156" }
+ethereum-light-client-verifier = { git = "https://github.com/yoshidan/ethereum-light-client-rs", rev = "fd7fe9ac107ef182b5b6e6600be54f794a247156" }
 
 [build-dependencies]
 tonic-build = "0.9"

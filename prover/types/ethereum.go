@@ -2,10 +2,8 @@ package types
 
 import "fmt"
 
-// IsGloas reports whether this fork spec is Gloas or later.
-//
-// Gloas is identified by execution_block_hash_gindex being set, which is the same
-// discriminator the Rust verifier uses (`ForkSpec::is_gloas`).
+// IsGloas reports whether this fork spec is Gloas or later, identified by
+// execution_block_hash_gindex being set (the same discriminator as `ForkSpec::is_gloas`).
 func (s *ForkSpec) IsGloas() bool {
 	return s.GetExecutionBlockHashGindex() != 0
 }
@@ -74,8 +72,7 @@ func (u *ExecutionUpdate) ValidateBasic() error {
 	if u.StateRoot == nil {
 		return fmt.Errorf("state root cannot be nil")
 	}
-	// Gloas proves the execution header by hashing its RLP instead of walking SSZ merkle
-	// branches, so StateRootBranch/BlockNumberBranch are intentionally absent there.
+	// Gloas carries the RLP instead of SSZ merkle branches.
 	if len(u.Rlp) > 0 {
 		if u.BlockHash == nil {
 			return fmt.Errorf("block hash cannot be nil")

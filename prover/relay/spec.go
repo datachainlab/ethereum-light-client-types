@@ -63,17 +63,15 @@ var (
 		ExecutionPayloadBlockNumberGindex: DenebSpec.ExecutionPayloadBlockNumberGindex,
 	}
 	FuluSpec = ElectraSpec
-	// GloasSpec: Uses execution_block_hash instead of ExecutionPayloadHeader.
-	// EIP-7688 turns BeaconState into a progressive container, so the state gindices
-	// are not inherited from Electra; EIP-7732 moves the execution commitment into
-	// signed_execution_payload_bid, which gives a new block body gindex.
+	// Gloas replaces the ExecutionPayloadHeader proof with execution_block_hash, and none
+	// of the state gindices are inherited from Electra (EIP-7688).
 	// ref: https://github.com/ethereum/consensus-specs/blob/master/specs/gloas/light-client/sync-protocol.md#new-constants
 	GloasSpec = types.ForkSpec{
 		FinalizedRootGindex:        735,  // FINALIZED_ROOT_GINDEX_GLOAS
 		CurrentSyncCommitteeGindex: 2945, // CURRENT_SYNC_COMMITTEE_GINDEX_GLOAS
 		NextSyncCommitteeGindex:    2946, // NEXT_SYNC_COMMITTEE_GINDEX_GLOAS
-		ExecutionPayloadGindex:     0,    // Not used in Gloas
-		// Not used in Gloas (RLP verification instead of SSZ merkle proofs)
+		// unused in Gloas: the execution header is proven by its RLP
+		ExecutionPayloadGindex:            0,
 		ExecutionPayloadStateRootGindex:   0,
 		ExecutionPayloadBlockNumberGindex: 0,
 		ExecutionBlockHashGindex:          2856, // EXECUTION_BLOCK_HASH_GINDEX_GLOAS
@@ -140,14 +138,9 @@ func EpochsPerSyncCommitteePeriod(network string) uint64 {
 	}
 }
 
-// convertToEthpandaopsForkVersions converts standard minimal fork versions to the
-// ethpandaops/ethereum-package scheme.
-// Ethpandaops reserves 0x10 for the genesis version and bumps each subsequent fork by 0x10,
-// so the standard-minimal fork ordinal n (Altair=1 .. Gloas=7) maps to (n+1)*0x10.
-// Standard minimal: GenesisForkVersion={0,0,0,1}, Fork.Version={n,0,0,1}
-// Ethpandaops:      GenesisForkVersion={0x10,0,0,0x38}, Fork.Version={(n+1)*0x10,0,0,0x38}
-// (genesis=0x10, Altair=0x20, Bellatrix=0x30, Capella=0x40, Deneb=0x50, Electra=0x60,
-// Fulu=0x70, Gloas=0x80)
+// convertToEthpandaopsForkVersions rewrites standard minimal fork versions {n,0,0,1} into
+// the ethpandaops/ethereum-package scheme {(n+1)*0x10,0,0,0x38}: genesis is 0x10000038 and
+// each fork bumps the first byte by 0x10 (Altair=0x20 .. Gloas=0x80).
 // ref: https://github.com/ethpandaops/ethereum-package/blob/main/src/package_io/constants.star
 func convertToEthpandaopsForkVersions(params *types.ForkParameters) *types.ForkParameters {
 	newGenesis := make([]byte, 4)

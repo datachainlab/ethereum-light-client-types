@@ -1,7 +1,7 @@
 //! Validation utilities for Ethereum light client updates.
 //!
 //! This module provides validation functions for consensus and execution updates,
-//! including pre-Gloas block hash verification.
+//! including execution block hash verification.
 
 use crate::consensus::ExecutionUpdateInfo;
 use crate::errors::Error;
@@ -14,14 +14,13 @@ use ethereum_light_client_verifier::updates::ConsensusUpdate;
 /// Difference between block_number gindex and block_hash gindex in ExecutionPayload.
 const BLOCK_NUMBER_TO_BLOCK_HASH_DIFF: u32 = 6;
 
-/// Validates the execution update block hash against the finalized execution
-/// root of `consensus_update`.
+/// Validates the execution update block hash against the finalized execution root of
+/// `consensus_update`.
 ///
-/// For pre-Gloas forks the block hash is verified via a Merkle proof against
-/// the execution payload root. For Gloas and later forks the execution root is
-/// the block hash itself, so the update's `block_hash` must simply equal it.
-///
-/// Required for L2 chains like Optimism and Arbitrum; not needed for Ethereum mainnet.
+/// Pre-Gloas the block hash is verified via a Merkle proof against the execution payload
+/// root; this is required for L2 chains like Optimism and Arbitrum and not needed for
+/// Ethereum mainnet. From Gloas the execution root is the block hash itself, so this only
+/// checks equality — the verifier already binds the header to that root via its RLP.
 pub fn validate_execution_update<const SYNC_COMMITTEE_SIZE: usize, CC, CU>(
     ctx: &CC,
     consensus_update: &CU,

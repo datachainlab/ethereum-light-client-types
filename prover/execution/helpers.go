@@ -9,7 +9,7 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 )
 
-// GetRawHeader fetches RLP-encoded block header via debug_getRawHeader
+// GetRawHeader fetches the RLP-encoded block header. Requires the node's debug namespace.
 func GetRawHeader(ctx context.Context, client RPCClient, blockHash common.Hash) ([]byte, error) {
 	var result hexutil.Bytes
 	if err := client.CallContext(ctx, &result, "debug_getRawHeader", blockHash); err != nil {
@@ -27,8 +27,6 @@ func GetBlockTimestamp(ctx context.Context, client Client, blockNumber uint64) (
 	return header.Time, nil
 }
 
-// BlockHeaderFields is the subset of an execution block header needed to locate the
-// beacon block that references it.
 type BlockHeaderFields struct {
 	Hash      common.Hash
 	Timestamp uint64
@@ -36,10 +34,10 @@ type BlockHeaderFields struct {
 
 // GetBlockHeaderFields fetches the hash and timestamp of a block by its number.
 //
-// This goes through eth_getBlockByNumber rather than go-ethereum's HeaderByNumber
-// because the hash must come from the node: Glamsterdam appends block_access_list_hash
-// (EIP-7928) and slot_number (EIP-7843) to the execution header, which go-ethereum's
-// types.Header does not know about, so a locally recomputed keccak256(rlp) is wrong.
+// The hash must come from the node, so this uses eth_getBlockByNumber rather than
+// go-ethereum's HeaderByNumber: Glamsterdam appends block_access_list_hash (EIP-7928) and
+// slot_number (EIP-7843), which types.Header does not know about, so a locally recomputed
+// keccak256(rlp) is wrong.
 func GetBlockHeaderFields(ctx context.Context, client RPCClient, blockNumber uint64) (*BlockHeaderFields, error) {
 	var raw struct {
 		Hash      *common.Hash    `json:"hash"`

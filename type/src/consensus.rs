@@ -118,23 +118,16 @@ pub struct ExecutionUpdateInfo {
 }
 
 impl ExecutionUpdateInfo {
-    /// Timestamp of the execution block this update describes, in unix nanoseconds, using the
-    /// rule that applies to the fork at `finalized_slot`.
+    /// Timestamp of the execution block this update describes, in unix nanoseconds. It is
+    /// derived, never taken from a relayer-supplied field.
     ///
-    /// The timestamp is derived rather than supplied, so it is never an input a relayer
-    /// controls. Both sources are already authenticated by the consensus update:
+    /// - pre-Gloas: the beacon block carries the execution payload of its own slot, so the
+    ///   timestamp is `compute_timestamp_at_slot(finalized_slot)`
+    /// - Gloas: this update describes the block the bid's `parent_block_hash` points at, whose
+    ///   timestamp is not derivable from the slot, so it is read from the RLP header
     ///
-    /// - pre-Gloas: the finalized beacon block carries the execution payload of its own slot,
-    ///   so the timestamp is `compute_timestamp_at_slot(finalized_slot)`, and `finalized_slot`
-    ///   comes from the sync-committee-verified finalized header
-    /// - Gloas: this update describes the block that the bid's `parent_block_hash` points at,
-    ///   whose timestamp is neither `compute_timestamp_at_slot(finalized_slot)` nor derivable
-    ///   from the slot, since slots may be skipped. It is read from the RLP header instead,
-    ///   which the consensus verifier pins via `keccak256(rlp) == execution_block_hash` — the
-    ///   same binding that already covers `state_root` and `block_number`.
-    ///
-    /// Only call this once the update itself has been verified: the Gloas branch reads the RLP,
-    /// and that is the step which binds it to the consensus update.
+    /// Call this only after the update has been verified: the RLP is bound to the consensus
+    /// update by `keccak256(rlp) == execution_block_hash`, which the verifier checks.
     pub fn timestamp<C: ChainConsensusVerificationContext>(
         &self,
         ctx: &C,

@@ -103,11 +103,8 @@ func (cl Client) GetBlockRoot(ctx context.Context, slot uint64, allowOptimistic 
 
 // GetExecutionPayloadBidParentBlockHash returns
 // `signed_execution_payload_bid.message.parent_block_hash` of the beacon block at `slot`,
-// which is the execution block the proposer at that slot built on and therefore the block
-// the slot's light client header references.
-//
-// Gloas onwards only; it fails for earlier forks, which carry the execution payload in the
-// block itself and have no bid.
+// which is the execution block the slot's light client header references.
+// Gloas onwards only; earlier forks have no bid and are an error here.
 func (cl Client) GetExecutionPayloadBidParentBlockHash(ctx context.Context, slot uint64) ([]byte, error) {
 	var res BeaconBlockBidResponse
 	if err := cl.fetcher.Get(ctx, fmt.Sprintf("/eth/v2/beacon/blocks/%v", slot), &res); err != nil {
