@@ -99,13 +99,13 @@ func TestGetForkParameters(t *testing.T) {
 			name:            "mainnet",
 			network:         Mainnet,
 			minimalSchedule: nil,
-			expectForkCount: 6, // Altair, Bellatrix, Capella, Deneb, Electra, Fulu
+			expectForkCount: 7, // Altair, Bellatrix, Capella, Deneb, Electra, Fulu, Gloas
 		},
 		{
 			name:            "sepolia",
 			network:         Sepolia,
 			minimalSchedule: nil,
-			expectForkCount: 6,
+			expectForkCount: 7,
 		},
 		{
 			name:    "minimal",
@@ -117,8 +117,9 @@ func TestGetForkParameters(t *testing.T) {
 				Deneb:     0,
 				Electra:   0,
 				Fulu:      0,
+				Gloas:     0,
 			},
-			expectForkCount: 6,
+			expectForkCount: 7,
 		},
 	}
 
@@ -139,8 +140,19 @@ func TestGetForkParameters(t *testing.T) {
 }
 
 func TestForkSpecs(t *testing.T) {
-	// Test that specs have ExecutionPayloadGindex set
+	// Test that Gloas spec has ExecutionBlockHashGindex set
+	if GloasSpec.ExecutionBlockHashGindex == 0 {
+		t.Error("GloasSpec.ExecutionBlockHashGindex should not be 0")
+	}
+	if GloasSpec.ExecutionPayloadGindex != 0 {
+		t.Error("GloasSpec.ExecutionPayloadGindex should be 0")
+	}
+
+	// Test that pre-Gloas specs have ExecutionPayloadGindex set
 	if DenebSpec.ExecutionPayloadGindex == 0 {
 		t.Error("DenebSpec.ExecutionPayloadGindex should not be 0")
+	}
+	if DenebSpec.ExecutionBlockHashGindex != 0 {
+		t.Error("DenebSpec.ExecutionBlockHashGindex should be 0")
 	}
 }

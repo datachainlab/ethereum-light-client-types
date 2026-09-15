@@ -12,7 +12,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
-var SupportedVersions = []string{"deneb", "electra", "fulu"}
+var SupportedVersions = []string{"deneb", "electra", "fulu", "gloas"}
 
 var httpClient = &http.Client{
 	Transport: otelhttp.NewTransport(http.DefaultTransport),
@@ -99,6 +99,25 @@ func (cl Client) GetBlockRoot(ctx context.Context, slot uint64, allowOptimistic 
 		return nil, fmt.Errorf("optimistic execution not allowed")
 	}
 	return &res, nil
+}
+
+// GetExecutionPayloadBidParentBlockHash returns
+// `signed_execution_payload_bid.message.parent_block_hash` of the beacon block at `slot`,
+// which is the execution block the slot's light client header references.
+// Gloas onwards only; earlier forks have no bid and are an error here.
+func (cl Client) GetExecutionPayloadBidParentBlockHash(ctx context.Context, slot uint64) ([]byte, error) {
+	var res BeaconBlockBidResponse
+	if err := cl.fetcher.Get(ctx, fmt.Sprintf("/eth/v2/beacon/blocks/%v", slot), &res); err != nil {
+		return nil, err
+	}
+	bid := res.Data.Message.Body.SignedExecutionPayloadBid
+	if bid == nil {
+		return nil, fmt.Errorf("block has no execution payload bid: slot=%v version=%v", slot, res.Version)
+	}
+	if len(bid.Message.ParentBlockHash) != 32 {
+		return nil, fmt.Errorf("unexpected parent block hash length: slot=%v length=%v", slot, len(bid.Message.ParentBlockHash))
+	}
+	return bid.Message.ParentBlockHash, nil
 }
 
 func (cl Client) GetFinalityCheckpoints(ctx context.Context) (*StateFinalityCheckpoints, error) {

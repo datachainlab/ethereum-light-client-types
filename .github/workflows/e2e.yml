@@ -13,7 +13,7 @@ jobs:
     timeout-minutes: 30
     env:
       BEACON_ENDPOINT: https://ethereum-beacon-api.publicnode.com
-      EXECUTION_ENDPOINT: https://ethereum-rpc.publicnode.com
+      EXECUTION_ENDPOINT: https://eth.drpc.org
       # TOKI's IBC handler (OwnableUpgradeableIBCHandler proxy) on mainnet
       IBC_ADDRESS: "0x0f4BDbE6735BFa859A73F8Da9251662E1081ca9C"
       IBC_CLIENT_ID: "lcp-client-0"
