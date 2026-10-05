@@ -293,10 +293,13 @@ func GetForkParameters(network string, minimalForkSchedule map[string]uint64) *t
 					Epoch:   272640,
 					Spec:    &FuluSpec,
 				},
-				// Gloas Sepolia fork epoch is TBD
+				// The metadata of Gloas Sepolia is from
+				// https://github.com/eth-clients/sepolia/blob/main/metadata/config.yaml
+				// Epoch 353024 is timestamp 1791294816, which matches geth's SepoliaChainConfig
+				// AmsterdamTime as of v1.17.6.
 				{
 					Version: []byte{144, 0, 0, 118},
-					Epoch:   18446744073709551615, // TBD: set to max uint64 until confirmed
+					Epoch:   353024,
 					Spec:    &GloasSpec,
 				},
 			},
