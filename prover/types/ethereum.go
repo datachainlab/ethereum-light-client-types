@@ -2,6 +2,28 @@ package types
 
 import "fmt"
 
+// IsGloas reports whether this fork spec is Gloas or later, identified by
+// execution_block_hash_gindex being set (the same discriminator as `ForkSpec::is_gloas`).
+func (s *ForkSpec) IsGloas() bool {
+	return s.GetExecutionBlockHashGindex() != 0
+}
+
+// ForkAtEpoch returns the fork active at `epoch`, or nil if `epoch` precedes every fork.
+func (p *ForkParameters) ForkAtEpoch(epoch uint64) *Fork {
+	forks := p.GetForks()
+	for i := len(forks) - 1; i >= 0; i-- {
+		if epoch >= forks[i].GetEpoch() {
+			return forks[i]
+		}
+	}
+	return nil
+}
+
+// IsGloas reports whether the fork active at `epoch` is Gloas or later.
+func (p *ForkParameters) IsGloas(epoch uint64) bool {
+	return p.ForkAtEpoch(epoch).GetSpec().IsGloas()
+}
+
 func (u *ConsensusUpdate) ValidateBasic() error {
 	if u == nil {
 		return fmt.Errorf("light client update cannot be nil")
@@ -49,6 +71,13 @@ func (u *ExecutionUpdate) ValidateBasic() error {
 	}
 	if u.StateRoot == nil {
 		return fmt.Errorf("state root cannot be nil")
+	}
+	// Gloas carries the RLP instead of SSZ merkle branches.
+	if len(u.Rlp) > 0 {
+		if u.BlockHash == nil {
+			return fmt.Errorf("block hash cannot be nil")
+		}
+		return nil
 	}
 	if u.StateRootBranch == nil {
 		return fmt.Errorf("state root branch cannot be nil")
